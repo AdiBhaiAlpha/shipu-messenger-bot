@@ -76,9 +76,9 @@ export function parseCommand(body: string, prefix: string): ParsedCommand {
     return notACommand;
   }
 
-  // Support "shipu <message>", "shipu ai <message>", "shipu", "shipu ai", "#shipu <message>", "#shipu ai <message>" triggers
+  // Support "shipu <message>", "shipu ai <message>", "shipu", "shipu ai", "#shipu <message>", "@shipu on" (mention) triggers
   const escapedPrefix = prefix.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  const shipuAiRegex = new RegExp(`^(?:${escapedPrefix})?shipu(?:\\s+ai)?(?:\\s+([\\s\\S]*))?$`, 'i');
+  const shipuAiRegex = new RegExp(`^(?:${escapedPrefix}|@)?shipu(?:\\s+ai)?(?:\\s+([\\s\\S]*))?$`, 'i');
   const shipuAiMatch = normalizedBody.match(shipuAiRegex);
 
   if (shipuAiMatch) {

@@ -95,7 +95,7 @@ export class AIOSService {
 
             await adapter.sendMessage(
               session.threadID,
-              `⏰ Your free 30-minute / 50-message ShiPu AI session has ended.\n\n` +
+              `⏰ Your free 20-minute / 50-message ShiPu AI session has ended.\n\n` +
               `Use\n` +
               `#resetai\n` +
               `to reset your timer for 50 coins.\n\n` +
@@ -160,7 +160,7 @@ export class AIOSService {
   }
 
   /**
-   * Activates a new 30-minute / 50-message AI Session.
+   * Activates a new 20-minute / 50-message AI Session.
    */
   public async activateSession(userID: string, threadID: string, accountId?: string): Promise<{ success: boolean; message: string; session?: any }> {
     // 1. Check existing active session
@@ -190,7 +190,7 @@ export class AIOSService {
 
     // 3. Create active session
     const sessionID = `sess_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`;
-    const expiresAt = new Date(Date.now() + 30 * 60 * 1000); // 30 minutes
+    const expiresAt = new Date(Date.now() + 20 * 60 * 1000); // 20 minutes
 
     const newSession = await (AIOSSessionModel as any).create({
       sessionID,

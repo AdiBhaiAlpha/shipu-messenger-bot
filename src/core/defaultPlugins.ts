@@ -78,7 +78,7 @@ async function processShipuAiResponse(senderID: string, threadID: string, rawTex
   const isDirectCall = Boolean(
     headerPrefix ||
     eventObj?.isDirectCommand ||
-    /^(?:#)?shipu(?:\s+ai)?(?:\s+|$)/i.test(rawText.trim())
+    /^(?:#|@)?shipu(?:\s+ai)?(?:\s+|$)/i.test(rawText.trim())
   );
   const now = Date.now();
 
@@ -102,7 +102,7 @@ async function processShipuAiResponse(senderID: string, threadID: string, rawTex
       { $inc: { messageCount: 1 } }
     ).catch(() => {});
 
-    // Check if session limits (30 mins or 50 msgs) reached on this turn
+    // Check if session limits (20 mins or 50 msgs) reached on this turn
     if (now >= session.expiresAt || session.messageCount >= (session.maxMessages || 50)) {
       session.active = false;
       delete (globalThis as any).shipuSessions[senderID];
@@ -1683,7 +1683,7 @@ export const defaultPlugins: ShiPuCommandModule[] = [
       version: '1.2.0',
       role: 0,
       author: 'ShiPu AIOS Core',
-      description: 'Start or end your free 30-minute / 50-message AI Operating System (AIOS) session or ask a question directly',
+      description: 'Start or end your free 20-minute / 50-message AI Operating System (AIOS) session or ask a question directly',
       category: 'ai',
       guide: '{pref}shipu <on | off | question>',
       countDown: 3,
@@ -1708,7 +1708,7 @@ export const defaultPlugins: ShiPuCommandModule[] = [
         if (res.success) {
           activatedSuccess = true;
           const now = Date.now();
-          const expiresAt = now + 30 * 60 * 1000; // 30 minutes
+          const expiresAt = now + 20 * 60 * 1000; // 20 minutes
 
           // Fetch user personal memory facts
           const userMemory = await (AIOSMemoryModel as any).findOne({ userID: senderID }) || {
@@ -1722,7 +1722,7 @@ export const defaultPlugins: ShiPuCommandModule[] = [
             threadID,
             startedAt: now,
             expiresAt,
-            remainingTime: 1800,
+            remainingTime: 1200,
             messageCount: 0,
             maxMessages: 50,
             conversationHistory: userMemory.conversationContext || [],
@@ -1740,7 +1740,7 @@ export const defaultPlugins: ShiPuCommandModule[] = [
               } catch (err) {}
               try {
                 await message.send(
-                  `⏰ Your free 30-minute / 50-message ShiPu AI session has ended.\n\n` +
+                  `⏰ Your free 20-minute / 50-message ShiPu AI session has ended.\n\n` +
                   `Use\n` +
                   `#resetai\n` +
                   `to reset your timer for 50 coins.\n\n` +
@@ -1751,7 +1751,7 @@ export const defaultPlugins: ShiPuCommandModule[] = [
                 console.error(err);
               }
             }
-          }, 30 * 60 * 1000);
+          }, 20 * 60 * 1000);
         } else {
           // If session is already active in DB, restore it in globalThis memory so the user can continue chatting
           try {
@@ -1792,7 +1792,7 @@ export const defaultPlugins: ShiPuCommandModule[] = [
               `✓ Personal memory loaded\n` +
               `✓ Conversation context restored\n` +
               `✓ Smart Brain connected\n\n` +
-              ` You can now chat normally for the next 30 minutes (up to 50 messages).\n\n` +
+              ` You can now chat normally for the next 20 minutes (up to 50 messages).\n\n` +
               `Just send your message.`
             );
           } else {
