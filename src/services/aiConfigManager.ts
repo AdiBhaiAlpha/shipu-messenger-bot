@@ -1,4 +1,4 @@
-import { BotSettingModel } from '../db/mongodb';
+import { BotSettingModel } from '../db/firebaseDb';
 import { encryptPassword, decryptPassword } from '../utils/crypto';
 import axios from 'axios';
 

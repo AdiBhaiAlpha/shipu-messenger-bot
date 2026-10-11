@@ -1,4 +1,4 @@
-import { OfficialGroupModel, SharedAccessUserModel, connectMongoDB } from '../db/mongodb';
+import { OfficialGroupModel, SharedAccessUserModel, connectDatabase } from '../db/firebaseDb';
 import { multiAccountManager } from '../adapters/messenger/MultiAccountManager';
 import { messengerLogger } from '../adapters/messenger/MessengerLogger';
 
@@ -35,7 +35,7 @@ export class SharedAccessService {
   }
 
   public async getOfficialGroups(): Promise<OfficialGroupRecord[]> {
-    await connectMongoDB();
+    await connectDatabase();
     try {
       const records = await (OfficialGroupModel.find({ active: true } as any) as any).sort({ order: 1 }).lean();
       return (records || []).map((r: any) => ({
@@ -52,7 +52,7 @@ export class SharedAccessService {
   }
 
   public async saveOfficialGroups(groups: OfficialGroupRecord[]): Promise<{ success: boolean; message: string }> {
-    await connectMongoDB();
+    await connectDatabase();
     if (!Array.isArray(groups) || groups.length > 5) {
       return { success: false, message: 'You can configure a maximum of 5 Official Access Groups.' };
     }
@@ -82,7 +82,7 @@ export class SharedAccessService {
   }
 
   public async verifyUserMembership(userID: string, userName?: string, apiOverride?: any): Promise<UserAccessStatus> {
-    await connectMongoDB();
+    await connectDatabase();
     const api = apiOverride || this.getFcaApi();
     const officialGroups = await this.getOfficialGroups();
 
@@ -279,7 +279,7 @@ export class SharedAccessService {
   }
 
   public async registerAuthorizedGroup(userID: string, threadID: string): Promise<void> {
-    await connectMongoDB();
+    await connectDatabase();
     if (!userID || !threadID) return;
     try {
       await SharedAccessUserModel.updateOne(
@@ -293,7 +293,7 @@ export class SharedAccessService {
   }
 
   public async getAllUsersStatus(): Promise<UserAccessStatus[]> {
-    await connectMongoDB();
+    await connectDatabase();
     try {
       const records = await (SharedAccessUserModel.find({} as any) as any).lean();
       return (records || []).map((r: any) => ({

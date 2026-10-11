@@ -1,9 +1,9 @@
 import { goatBotLoader } from '../core/goatBotLoader';
 import { botEngine } from '../core/botEngine';
 import { performanceTracker } from './performanceTracker';
-import { UserModel, AIOSMemoryModel, ThreadMemoryModel, AIOSUsageModel, MessageLogModel } from '../db/mongodb';
+import { UserModel, AIOSMemoryModel, ThreadMemoryModel, AIOSUsageModel, MessageLogModel } from '../db/firebaseDb';
 import { multiAccountManager } from '../adapters/messenger/MultiAccountManager';
-import mongoose from 'mongoose';
+import { isDatabaseConnected } from '../db/firebaseDb';
 
 export interface InternalTool {
   name: string;
@@ -99,7 +99,7 @@ export class ToolDiscoveryEngine {
           heapTotalMB = Math.round(mem.heapTotal / 1024 / 1024);
         }
 
-        const mongoState = mongoose.connection.readyState === 1 ? 'সচল (Connected)' : 'বিচ্ছিন্ন (Disconnected)';
+        const mongoState = isDatabaseConnected() ? 'সচল (Connected)' : 'বিচ্ছিন্ন (Disconnected)';
         const accountsMeta = multiAccountManager.getAllAccountsMeta();
 
         return {

@@ -1,6 +1,8 @@
 import { FCAFallbackManager } from './fca/FCAFallbackManager';
 import { FCAConnection } from './fca/FCAProvider';
 import { normalizeFcaApi } from './fca/normalizeFcaApi';
+import { coerceAppState } from './fca/normalizeAppState';
+import { isMqttListenerEnabled } from './fca/fcaConfig';
 import { messengerLogger, MessengerLogger } from './MessengerLogger';
 import { ErrorClassifier } from './ErrorClassifier';
 import { messengerAccountsData, MessengerAccountRecord } from '../../db/database';
@@ -45,6 +47,44 @@ export type AccountMqttStatus =
   | 'MQTT_ACTIVE';
 
 import { isSelfEvent } from '../../utils/commandParser';
+
+/**
+ * Normalize whatever `listenMqtt` returned into a safe teardown call.
+ * FCA returns an emitter object (with stopListening/stopListeningAsync) — NOT
+ * a stop function — and also attaches stop methods on the api object itself.
+ * Calling the raw return value as a function throws TypeError and leaves the
+ * old stream open, stacking duplicate subscriptions on every reconnect.
+ */
+function teardownFcaListener(api: any, listenReturnValue: any): void {
+  try {
+    const asyncStop = api?.stopListeningAsync;
+    if (typeof asyncStop === 'function') {
+      const p = asyncStop.call(api);
+      if (p && typeof p.then === 'function') p.catch(() => {});
+      return;
+    }
+    const syncStop = api?.stopListening;
+    if (typeof syncStop === 'function') {
+      syncStop.call(api, () => {});
+      return;
+    }
+    const ret = listenReturnValue;
+    if (ret && typeof ret === 'object') {
+      if (typeof ret.stopListeningAsync === 'function') {
+        const p = ret.stopListeningAsync();
+        if (p && typeof p.then === 'function') p.catch(() => {});
+        return;
+      }
+      if (typeof ret.stopListening === 'function') {
+        ret.stopListening(() => {});
+        return;
+      }
+    }
+    if (typeof ret === 'function') {
+      ret();
+    }
+  } catch {}
+}
 
 export interface AccountSessionState {
   accountId: string;
@@ -148,6 +188,11 @@ export class AccountConnection {
 
   private fcaConnection: FCAConnection | null = null;
   private stopListenerFunc: (() => void) | null = null;
+  private stopListenerRaw: any = null;
+  /** Fires if a registered listener delivers no event within the grace period. */
+  private deadStreamWatchdog: NodeJS.Timeout | null = null;
+  /** Incremented on every start/teardown to invalidate stale listener handles. */
+  private listenerGeneration = 0;
   public activeProviderName = 'DongDev FCA';
   private fallbackManager = new FCAFallbackManager();
 
@@ -284,15 +329,10 @@ export class AccountConnection {
   }
 
   public resetSession() {
+    this.teardownListener('reset');
     if (this.reconnectTimer) {
       clearTimeout(this.reconnectTimer);
       this.reconnectTimer = null;
-    }
-    if (this.stopListenerFunc) {
-      try {
-        this.stopListenerFunc();
-      } catch {}
-      this.stopListenerFunc = null;
     }
     this.sessionState.loginAttempted = false;
     this.sessionState.authenticated = false;
@@ -300,6 +340,52 @@ export class AccountConnection {
     this.fcaConnection = null;
     this.lastEmittedStatus = '';
     this.lastEmittedMqttStatus = '';
+  }
+
+  /**
+   * Tear down any previous MQTT subscription BEFORE creating a new one.
+   * Handles every shape FCA surfaces (stop function / emitter object /
+   * api-attached stop method) and invalidates stale handles via generation.
+   */
+  private teardownListener(reason: string) {
+    this.listenerGeneration += 1;
+    if (this.deadStreamWatchdog) {
+      clearTimeout(this.deadStreamWatchdog);
+      this.deadStreamWatchdog = null;
+    }
+    const raw = this.stopListenerRaw;
+    const fn = this.stopListenerFunc;
+    this.stopListenerRaw = null;
+    this.stopListenerFunc = null;
+    if (raw !== null || fn) {
+      messengerLogger.info('MQTT', `[MQTT][Account ${this.accountId}] Tearing down previous listener (${reason})`);
+      if (raw !== null) {
+        teardownFcaListener(this.getFcaApi(), raw);
+      } else if (fn) {
+        try { fn(); } catch {}
+      }
+    }
+  }
+
+  /** Watchdog: FCA emits neither error nor event when getSeqID handshake fails. */
+  private armDeadStreamWatchdog(generation: number, graceMs = 60000) {
+    if (this.deadStreamWatchdog) {
+      clearTimeout(this.deadStreamWatchdog);
+      this.deadStreamWatchdog = null;
+    }
+    this.deadStreamWatchdog = setTimeout(() => {
+      if (generation !== this.listenerGeneration) return;
+      if (this.mqttStatus === 'EVENT_STREAM_ACTIVE') return;
+      messengerLogger.warn('MQTT', `[WARN][MQTT][Account ${this.accountId}] Listener registered but no event within ${Math.round(graceMs / 1000)}s (dead stream). Scheduling reconnect...`);
+      this.status = 'TEMPORARY_ERROR';
+      this.mqttStatus = 'DISCONNECTED';
+      this.sessionState.status = 'DISCONNECTED';
+      this.emitStatusChange();
+      this.scheduleMqttReconnect();
+    }, graceMs);
+    if (typeof this.deadStreamWatchdog.unref === 'function') {
+      this.deadStreamWatchdog.unref();
+    }
   }
 
   public updateRecord(record: MessengerAccountRecord) {
@@ -467,6 +553,7 @@ export class AccountConnection {
       
       if (
         !this.stopListenerFunc &&
+        !this.stopListenerRaw &&
         this.mqttStatus !== 'EVENT_STREAM_ACTIVE' &&
         this.mqttStatus !== 'LISTENING' &&
         this.mqttStatus !== 'WAITING_FOR_FIRST_EVENT'
@@ -477,11 +564,15 @@ export class AccountConnection {
     }
 
     if (this.sessionState.status === 'AUTH_INVALID' || this.status === 'COOKIE_EXPIRED' || this.status === 'AUTH_FAILED' || this.status === 'CHECKPOINT') {
-      // If manually called or session being restored, allow fresh attempt if authState exists
-      if (!this.encryptedAuthState) {
-        messengerLogger.warn('AUTH', `[AUTH][Account ${this.accountId}] Session has no auth state. Manual cookie update required.`);
-        return false;
-      }
+      messengerLogger.warn('AUTH', `[AUTH][Account ${this.accountId}] Session is marked AUTH_INVALID/COOKIE_EXPIRED. Automatic login loop stopped.`);
+      messengerLogger.warn('AUTH', `[AUTH][Account ${this.accountId}] Manual cookie replacement required from admin dashboard.`);
+      return false;
+    }
+
+    if (this.sessionState.loginAttempted) {
+      messengerLogger.warn('AUTH', `[WARN][AUTH][Account ${this.accountId}] Initial authentication attempt already completed for process lifetime.`);
+      messengerLogger.error('AUTH', `[ERROR][AUTH][Account ${this.accountId}] Automatic re-login blocked. Manual cookie update required.`);
+      return false;
     }
 
     if (this.reconnectTimer) {
@@ -489,8 +580,8 @@ export class AccountConnection {
       this.reconnectTimer = null;
     }
 
-    // 2. Perform Authentication
-    this.sessionState.loginAttempted = true;
+    // 2. Perform ONE-TIME Authentication
+    this.sessionState.loginAttempted = true; // Lock immediately for process lifetime!
     this.sessionState.status = 'AUTHENTICATING';
     this.status = 'AUTHENTICATING';
     this.mqttStatus = 'CONNECTING';
@@ -514,7 +605,21 @@ export class AccountConnection {
     }
 
     if (this.authType === 'cookie') {
-      const authResult = await this.fallbackManager.authenticate(JSON.parse(authState));
+      // coerceAppState (not JSON.parse) so object-format / header-string
+      // exports cannot reach the provider and blow up on .map() with an
+      // "unexpected token type" style failure.
+      const appState = coerceAppState(authState);
+      if (appState.length === 0) {
+        this.sessionState.status = 'AUTH_INVALID';
+        this.sessionState.authenticated = false;
+        this.status = 'AUTH_FAILED';
+        this.mqttStatus = 'OFF';
+        this.lastErrorCode = 'INVALID_APPSTATE';
+        messengerLogger.error('AUTH', `[ERROR][AUTH][Account ${this.accountId}] Stored session has no usable cookies. Manual cookie update required.`);
+        this.emitStatusChange();
+        return false;
+      }
+      const authResult = await this.fallbackManager.authenticate(appState);
 
       if (!authResult.connection) {
         const classified = ErrorClassifier.classify({
@@ -579,10 +684,39 @@ export class AccountConnection {
     this.reconnectCount = 0;
     this.emitStatusChange();
 
-    return this.startMqttListener();
+    try {
+      return this.startMqttListener();
+    } catch (listenErr: any) {
+      messengerLogger.warn('MQTT', `[WARN][MQTT][Account ${this.accountId}] Listener startup threw: ${listenErr?.message || listenErr}. Scheduling reconnect...`);
+      this.lastErrorCode = 'LISTENER_STARTUP_ERROR';
+      this.status = 'TEMPORARY_ERROR';
+      this.mqttStatus = 'ERROR';
+      this.sessionState.status = 'DISCONNECTED';
+      this.emitStatusChange();
+      this.scheduleMqttReconnect();
+      return false;
+    }
   }
 
   public startMqttListener(): boolean {
+    try {
+      // fca-config.json's mqtt.enabled is ignored by FCA itself; honour it here.
+      if (!isMqttListenerEnabled()) {
+        messengerLogger.info(
+          'MQTT',
+          `[MQTT][Account ${this.accountId}] Realtime listener disabled via fca-config.json (mqtt.enabled = false)`
+        );
+        this.teardownListener('mqtt-disabled');
+        this.status = 'CONNECTED';
+        this.mqttStatus = 'OFF';
+        this.sessionState.status = 'AUTHENTICATED';
+        this.emitStatusChange();
+        return false;
+      }
+    } catch (cfgErr: any) {
+      messengerLogger.warn('MQTT', `[MQTT][Account ${this.accountId}] Listener config check failed, proceeding: ${cfgErr?.message || cfgErr}`);
+    }
+
     const api = this.getFcaApi();
     const listenFunc = typeof api?.listenMqtt === 'function' ? api.listenMqtt.bind(api) : (typeof api?.listen === 'function' ? api.listen.bind(api) : null);
     if (!api || !listenFunc) {
@@ -603,28 +737,27 @@ export class AccountConnection {
       return false;
     }
 
-    if (this.stopListenerFunc) {
-      try {
-        this.stopListenerFunc();
-      } catch {}
-      this.stopListenerFunc = null;
-    }
+    // Tear down any previous subscription BEFORE creating a new one. FCA's
+    // listenMqtt returns an emitter object (not a stop function), so the raw
+    // value is kept and torn down via teardownFcaListener().
+    this.teardownListener('reconnect');
 
     try {
-      messengerLogger.info('MQTT', `[INFO][MQTT][Account ${this.accountId}] Establishing MQTT listener using existing authenticated session`);
-      
+      messengerLogger.info('MQTT', `[INFO][MQTT][Account ${this.accountId}] Attempting listener reconnect using existing authenticated session`);
+
       if (typeof api.setOptions === 'function') {
         api.setOptions({
           listenEvents: true,
-          selfListen: true,
-          autoReconnect: true,
-          emitReady: true,
+          selfListen: false,
+          autoReconnect: false,
+          emitReady: false,
           logLevel: 'silent',
           updatePresence: false
         });
       }
 
-      this.stopListenerFunc = listenFunc((err: any, event: any) => {
+      const generation = this.listenerGeneration;
+      const rawStop = listenFunc((err: any, event: any) => {
         messengerLogger.info('MQTT', `[DEBUG][LISTEN][Account ${this.accountId}] Received callback in listen. Error: ${!!err}, Event: ${!!event}`);
         
         // Handle explicit error parameter OR inactive/auth error objects passed inside event parameter
@@ -648,12 +781,7 @@ export class AccountConnection {
               clearTimeout(this.reconnectTimer);
               this.reconnectTimer = null;
             }
-            if (typeof this.stopListenerFunc === 'function') {
-              try {
-                this.stopListenerFunc();
-              } catch {}
-              this.stopListenerFunc = null;
-            }
+            this.teardownListener('terminal-auth-error');
             this.emitStatusChange();
             return;
           }
@@ -791,11 +919,19 @@ export class AccountConnection {
         }
       });
 
+      // Keep the raw return value (emitter object on real FCA) and expose a
+      // normalized stop closure. Never call the raw value directly.
+      this.stopListenerRaw = rawStop;
+      const selfApi = api;
+      const selfRaw = rawStop;
+      this.stopListenerFunc = () => teardownFcaListener(selfApi, selfRaw);
+
       this.status = 'MQTT_LISTENING';
       this.mqttStatus = 'LISTENING';
       this.sessionState.status = 'LISTENING';
       this.emitStatusChange();
       messengerLogger.success('MQTT', `[SUCCESS][MQTT][Account ${this.accountId}] listenMqtt active`);
+      this.armDeadStreamWatchdog(generation);
       return true;
     } catch (mqttErr: any) {
       const classified = ErrorClassifier.classify(mqttErr);
@@ -813,12 +949,7 @@ export class AccountConnection {
           clearTimeout(this.reconnectTimer);
           this.reconnectTimer = null;
         }
-        if (typeof this.stopListenerFunc === 'function') {
-          try {
-            this.stopListenerFunc();
-          } catch {}
-          this.stopListenerFunc = null;
-        }
+        this.teardownListener('terminal-mqtt-error');
         this.emitStatusChange();
         return false;
       }
@@ -874,12 +1005,7 @@ export class AccountConnection {
       this.reconnectTimer = null;
     }
 
-    if (this.stopListenerFunc) {
-      try {
-        this.stopListenerFunc();
-      } catch {}
-      this.stopListenerFunc = null;
-    }
+    this.teardownListener('disconnect');
 
     // CRITICAL: Do NOT call api.logout() during normal disconnect / process restart!
     // Calling api.logout() revokes the session on Facebook's servers.
@@ -900,12 +1026,7 @@ export class AccountConnection {
       this.reconnectTimer = null;
     }
 
-    if (this.stopListenerFunc) {
-      try {
-        this.stopListenerFunc();
-      } catch {}
-      this.stopListenerFunc = null;
-    }
+    this.teardownListener('admin-logout');
 
     if (this.fcaConnection?.api?.logout) {
       try {

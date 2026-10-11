@@ -1,7 +1,7 @@
 import { parseCommand } from '../utils/commandParser';
 import { messengerLogger } from '../adapters/messenger/MessengerLogger';
 import { brainService, collapseRepeatingChars, stripEmojiFormatters } from '../services/brainService';
-import { BrainMemoryModel } from '../db/mongodb';
+import { BrainMemoryModel } from '../db/firebaseDb';
 
 export interface SmartBrainMessageParams {
   text: string;

@@ -27,7 +27,7 @@ import { parseCommand, isSelfEvent, recordBotMessageId } from '../utils/commandP
 import { smartConversationBrain } from './smartConversationBrain';
 import { brainService } from '../services/brainService';
 import { aiosService } from '../services/aiosService';
-import { BrainMemoryModel, BrainSuggestionModel } from '../db/mongodb';
+import { BrainMemoryModel, BrainSuggestionModel } from '../db/firebaseDb';
 import { emergencyAntiSpamGuard } from './EmergencyAntiSpamGuard';
 import { performanceTracker } from '../services/performanceTracker';
 import { prepareAttachments } from './attachmentUtils';
@@ -497,7 +497,7 @@ class ShiPuBotEngine {
     this.updateStats();
 
     // Async sync to MongoDB UserModel
-    import('../db/mongodb').then(({ UserModel }) => {
+    import('../db/firebaseDb').then(({ UserModel }) => {
       (UserModel as any).updateOne({ userID }, { $set: updated }, { upsert: true }).catch(() => {});
     }).catch(() => {});
 
@@ -662,7 +662,7 @@ class ShiPuBotEngine {
       let activeSession = shipuSessions[senderID];
       if (!activeSession || !activeSession.active) {
         try {
-          const { AIOSSessionModel } = await import('../db/mongodb');
+          const { AIOSSessionModel } = await import('../db/firebaseDb');
           const dbSession = await (AIOSSessionModel as any).findOne({ userID: senderID, status: 'active' });
           if (dbSession && new Date(dbSession.expiresAt) > new Date()) {
             activeSession = { active: true };
@@ -1427,7 +1427,7 @@ class ShiPuBotEngine {
       this.updateStats();
 
       // Async sync to MongoDB UserModel
-      import('../db/mongodb').then(({ UserModel }) => {
+      import('../db/firebaseDb').then(({ UserModel }) => {
         (UserModel as any).updateOne({ userID }, { $setOnInsert: user }, { upsert: true }).catch(() => {});
       }).catch(() => {});
     } else if (isOwner && user.role !== 3) {

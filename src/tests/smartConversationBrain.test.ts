@@ -152,7 +152,7 @@ async function runSmartBrainTests() {
   smartConversationBrain.clearMemory();
   delete (globalThis as any).shipuSessions?.['user_9999_test'];
   try {
-    const { AIOSSessionModel } = await import('../db/mongodb');
+    const { AIOSSessionModel } = await import('../db/firebaseDb');
     await (AIOSSessionModel as any).deleteMany({ userID: 'user_9999_test' });
   } catch (err) {}
 

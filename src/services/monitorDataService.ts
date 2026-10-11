@@ -1,7 +1,7 @@
 import os from 'os';
 import { botEngine } from '../core/botEngine';
 import { performanceTracker } from './performanceTracker';
-import { getMongoStatus } from '../db/mongodb';
+import { getDatabaseStatus } from '../db/firebaseDb';
 import { ftpStorageService } from './ftpStorageService';
 import { commandsData, usersData, threadsData, ftpConfigData } from '../db/database';
 import { MonitorDashboardData } from '../utils/imageUtils';
@@ -11,7 +11,7 @@ export class MonitorDataService {
     const startTime = Date.now();
     const stats = botEngine.getStats();
     const perf = performanceTracker.getPerformanceReport();
-    const mongoStatus = getMongoStatus();
+    const mongoStatus = getDatabaseStatus();
     const ftpConfig = await ftpConfigData.get();
     
     // Commands, Users, Threads

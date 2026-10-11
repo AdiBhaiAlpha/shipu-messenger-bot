@@ -1,8 +1,9 @@
-import axios from 'axios';
-import fs from 'fs-extra';
-import path from 'path';
+const axios = require('axios');
+const fs = require('fs-extra');
+const path = require('path');
 
-export const config = {
+module.exports = {
+config: {
     name: "say",
     aliases: ["speak", "voice"],
     version: "1.0.0",
@@ -11,9 +12,9 @@ export const config = {
     description: "Generate speech/audio from text using Fish Audio via OpenRouter API.",
     usage: "#say [text]",
     cooldown: 5,
-};
+},
 
-export async function onStart({ message, args, api }) {
+onStart: async function({ message, args, api }) {
     if (!args || args.length === 0) {
         return message.reply("⚠️ Please provide text to convert to speech.\nUsage: #say [text]");
     }
@@ -106,3 +107,4 @@ export async function onStart({ message, args, api }) {
         return message.reply(`❌ Failed to generate speech: ${error.message || "Unknown error"}`);
     }
 }
+};

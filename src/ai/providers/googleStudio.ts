@@ -1,4 +1,4 @@
-import { AILogModel, FallbackApiModel } from '../../db/mongodb';
+import { AILogModel, FallbackApiModel } from '../../db/firebaseDb';
 import { aiConfigManager } from '../../services/aiConfigManager';
 
 export interface AIOSGenerateOptions {

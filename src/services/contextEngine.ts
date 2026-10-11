@@ -1,9 +1,9 @@
 import { goatBotLoader } from '../core/goatBotLoader';
 import { botEngine } from '../core/botEngine';
-import { MessageLogModel, AIOSMemoryModel, AIOSSessionModel, BrainMemoryModel, UserModel, ThreadMemoryModel, AIFeedbackModel, InferredAttributeModel } from '../db/mongodb';
+import { MessageLogModel, AIOSMemoryModel, AIOSSessionModel, BrainMemoryModel, UserModel, ThreadMemoryModel, AIFeedbackModel, InferredAttributeModel } from '../db/firebaseDb';
 import { isBotMessageId } from '../utils/commandParser';
 import { multiAccountManager } from '../adapters/messenger/MultiAccountManager';
-import mongoose from 'mongoose';
+import { isDatabaseConnected } from '../db/firebaseDb';
 import fs from 'fs';
 import path from 'path';
 
@@ -355,7 +355,7 @@ export class ContextEngine {
    * Real-time System Runtime State
    */
   public getRealtimeSystemState(): string {
-    const mongoState = mongoose.connection.readyState === 1 ? 'CONNECTED (MongoDB Active)' : 'DISCONNECTED';
+    const mongoState = isDatabaseConnected() ? 'CONNECTED (Firebase Active)' : 'DISCONNECTED';
     const accountsMeta = multiAccountManager.getAllAccountsMeta();
     const accountsCount = accountsMeta.length;
     const activeAccount = accountsMeta[0];

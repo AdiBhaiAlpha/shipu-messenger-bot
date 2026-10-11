@@ -4,7 +4,6 @@ import { initEnv } from './src/config/env';
 initEnv();
 
 import express, { Request, Response, NextFunction } from 'express';
-import mongoose from 'mongoose';
 import path from 'path';
 import fs from 'fs-extra';
 import net from 'net';
@@ -20,11 +19,10 @@ import {
   SafeSessionMeta,
   MessengerAdapterImpl,
   multiAccountManager,
-  MultiAccountManager,
-  testMongoConnection
+  MultiAccountManager
 } from './src/adapters/messenger';
 import { personalAIManager } from './src/adapters/messenger/PersonalAIManager';
-import { connectMongoDB, getMongoStatus, BrainMemoryModel, BrainSuggestionModel, AIOSMemoryModel, AIOSSessionModel, AIOSUsageModel, AILogModel, InferredAttributeModel, FallbackApiModel } from './src/db/mongodb';
+import { connectDatabase, getDatabaseStatus, BrainMemoryModel, BrainSuggestionModel, AIOSMemoryModel, AIOSSessionModel, AIOSUsageModel, AILogModel, InferredAttributeModel, FallbackApiModel } from './src/db/firebaseDb';
 import { brainService, stripEmojiFormatters } from './src/services/brainService';
 import { databaseConfig } from './src/config/database';
 import { usersData, threadsData, settingsData, auditLogsData, commandsData, adminBotData, ftpConfigData, messengerAccountsData } from './src/db/database';
@@ -48,7 +46,6 @@ import { ftpSyncService } from './src/services/ftpSyncService';
 import { economyService } from './src/services/economyService';
 import { cloudAccountManager } from './src/services/CloudAccountManager';
 import { clientBotsManager } from './src/services/ClientBotsManager';
-import { supabaseService } from './src/services/SupabaseService';
 import { accountRuntimeLogManager } from './src/services/AccountRuntimeLogManager';
 import { clientSiteStorage } from './src/services/ClientSiteStorage';
 import { smsSimulationService, smsValidator } from './src/services/smsSimulationService';
@@ -339,16 +336,27 @@ async function initializeDatabaseAndServices() {
   let res: { connected: boolean; error?: string } = { connected: false, error: '' };
   while (attempt < 5 && !res.connected) {
     attempt++;
-    console.log(`[STARTUP] Connecting to MongoDB, attempt ${attempt}/5...`);
-    res = await connectMongoDB();
+    console.log(`[STARTUP] Connecting to Firebase RTDB, attempt ${attempt}/5...`);
+    res = await connectDatabase();
     if (!res.connected) {
       await new Promise(r => setTimeout(r, 1500));
     }
   }
 
   if (res.connected) {
-    console.log('[MongoDB] Connected successfully to runtime database');
-    await supabaseService.loadConfigFromDB();
+    console.log('[Firebase] Connected successfully to runtime database');
+    // Durable session restore: Firebase RTDB holds the restart-proof copy of
+    // messenger sessions under shipu-messsenger-bot/. Pull any missing records
+    // before the session managers boot (best-effort, never throws).
+    try {
+      const { firebaseRtdbService } = await import('./src/services/firebaseRtdbService');
+      const restored = await firebaseRtdbService.restoreSessionsToMongo();
+      if (restored.error) {
+        console.warn('[FirebaseRTDB] Startup restore skipped:', restored.error);
+      }
+    } catch (fbErr: any) {
+      console.warn('[FirebaseRTDB] Startup restore skipped:', fbErr?.message || fbErr);
+    }
     await multiAccountManager.initializeAllAccountsFromDB();
     await personalAIManager.initializeAllAccountsFromDB();
     try {
@@ -384,7 +392,7 @@ async function initializeDatabaseAndServices() {
       console.log('[FTP] Startup verification skipped or local mode active.');
     }
   } else {
-    console.error('[MongoDB] Connection failed after 5 attempts:', res.error);
+    console.error('[Firebase] Connection failed after 5 attempts:', res.error);
     sharedAccessMonitor.start();
   }
 }
@@ -478,7 +486,7 @@ app.post('/api/admin/logout', requireAdminAuth, (req: Request, res: Response) =>
 
 // --- HEALTH CHECK & SYSTEM AVAILABILITY ENDPOINTS ---
 app.get('/api/health', (req: Request, res: Response) => {
-  const mongoStatus = getMongoStatus();
+  const mongoStatus = getDatabaseStatus();
   const sessionMeta = facebookSession.getSafeMetadata();
   const diagnostics = heartbeatService.getDiagnostics();
 
@@ -503,7 +511,7 @@ app.get('/api/health', (req: Request, res: Response) => {
 });
 
 app.get('/health', async (req: Request, res: Response) => {
-  const mongoStatus = getMongoStatus();
+  const mongoStatus = getDatabaseStatus();
   const sessionMeta = facebookSession.getSafeMetadata();
   const diagnostics = heartbeatService.getDiagnostics();
 
@@ -836,7 +844,7 @@ app.get('/api/system/availability', (req: Request, res: Response) => {
     }
   }
 
-  const mongoStatus = getMongoStatus();
+  const mongoStatus = getDatabaseStatus();
   const sessionMeta = facebookSession.getSafeMetadata();
   const diagnostics = heartbeatService.getDiagnostics();
 
@@ -1102,18 +1110,38 @@ app.post('/api/system/performance/reset', (req: Request, res: Response) => {
 
 // --- MONGODB RUNTIME STORAGE STATUS ENDPOINTS ---
 app.get(['/api/mongodb/status', '/api/database/status'], (req: Request, res: Response) => {
-  const mongoStatus = getMongoStatus();
+  const mongoStatus = getDatabaseStatus();
   res.json({
     connected: mongoStatus.connected,
     status: mongoStatus.connected ? 'ONLINE' : 'OFFLINE',
     connection: mongoStatus.connected ? 'Connected' : 'Connection failed',
     type: databaseConfig.type,
-    odm: 'Mongoose ODM',
-    storage: 'MongoDB Atlas',
+    odm: 'Firebase RTDB',
+    storage: 'Firebase Realtime Database',
     autoSyncWhenStart: databaseConfig.autoSyncWhenStart ? 'ENABLED' : 'DISABLED',
     autoRefreshThreadInfoFirstTime: databaseConfig.autoRefreshThreadInfoFirstTime ? 'ENABLED' : 'DISABLED',
     reason: mongoStatus.error || null
   });
+});
+
+// --- FIREBASE RTDB (shipu-messsenger-bot) STATUS & TEST ENDPOINTS ---
+app.get('/api/firebase/status', async (req: Request, res: Response) => {
+  try {
+    const { firebaseRtdbService } = await import('./src/services/firebaseRtdbService');
+    res.json({ success: true, ...firebaseRtdbService.getStatus() });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err?.message || String(err) });
+  }
+});
+
+app.post('/api/firebase/test', requireAdminAuth, async (req: Request, res: Response) => {
+  try {
+    const { firebaseRtdbService } = await import('./src/services/firebaseRtdbService');
+    const result = await firebaseRtdbService.testConnection();
+    res.json(result);
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err?.message || String(err) });
+  }
 });
 
 // --- ADMIN BOT MANAGEMENT API ENDPOINTS ---
@@ -1741,26 +1769,12 @@ const handleCookieRegistration = async (req: Request, res: Response) => {
       });
     }
 
-    // Step 3: Database selection
-    const mode = connectionMode || (targetUri ? 'custom' : 'default');
+    // Step 3: Database selection (Firebase RTDB is the only store now)
+    const mode = 'default' as const;
     logSyncStep('Database selected', { mode, dbName, collectionPrefix });
 
-    // Step 4: MongoDB connected
-    if (mode === 'custom' && targetUri) {
-      logSyncStep('Testing custom MongoDB connection', { targetUri: targetUri.substring(0, 30) + '...' });
-      const isDbValid = await testMongoConnection(targetUri);
-      if (!isDbValid) {
-        logSyncStep('Failed: Custom MongoDB connection verification failed');
-        return res.status(200).json({
-          success: false,
-          error: 'Database connection verification failed. Please check your MongoDB URI, network access, or credentials.',
-          code: 'DB_CONNECTION_FAILED'
-        });
-      }
-      logSyncStep('MongoDB connected successfully');
-    } else {
-      logSyncStep('MongoDB connected using default application connection');
-    }
+    // Step 4: Firebase RTDB connected
+    logSyncStep('Firebase RTDB connected using default application connection');
 
     // Step 5, 6, 7 & 8: Cookie Stored, Messenger Login Started, MQTT Started, Account Registered
     logSyncStep('Cookie storage, Messenger login, MQTT, and Account registration started');
@@ -2199,230 +2213,33 @@ app.post('/api/client/update-cookie', requireClientAuth, handleClientCookieUpdat
 app.post('/api/client/delete-cookie', requireClientAuth, handleClientCookieDelete);
 
 app.post('/api/client/test-db', requireClientAuth, async (req: Request, res: Response) => {
-  const { mongoUri, uri } = req.body;
-  const targetUri = mongoUri || uri;
-  if (!targetUri) {
-    return res.status(200).json({ success: false, error: 'MongoDB URI is required.', code: 'MISSING_URI' });
-  }
-
   try {
-    const conn = mongoose.createConnection(targetUri, {
-      connectTimeoutMS: 5000,
-      socketTimeoutMS: 10000,
-    } as any);
-
-    const isSuccess = await new Promise<boolean>((resolve) => {
-      const timeout = setTimeout(() => {
-        resolve(false);
-      }, 5000);
-
-      conn.once('connected', () => {
-        clearTimeout(timeout);
-        resolve(true);
-      });
-
-      conn.once('error', () => {
-        clearTimeout(timeout);
-        resolve(false);
-      });
-    });
-
-    try {
-      await conn.close();
-    } catch {}
-
-    if (isSuccess) {
-      return res.status(200).json({
-        success: true,
-        authentication: 'Success',
-        readPermission: 'Granted',
-        writePermission: 'Granted',
-        dbExists: 'Yes',
-        latencyMs: 40,
-        connectionHealth: 'Healthy',
-        message: 'MongoDB connection verified successfully.'
-      });
-    } else {
-      return res.status(200).json({
-        success: false,
-        error: 'Failed to establish connection to database.',
-        code: 'DB_CONNECTION_FAILED'
-      });
+    const { firebaseRtdbService } = await import('./src/services/firebaseRtdbService');
+    const result = await firebaseRtdbService.testConnection();
+    if (result.success) {
+      return res.status(200).json({ success: true, message: 'Database connection successful (Firebase RTDB).' });
     }
+    return res.status(200).json({ success: false, error: result.error || 'Database unreachable.', code: 'DB_CONNECTION_FAILED' });
   } catch (err: any) {
-    return res.status(200).json({
-      success: false,
-      error: err.message || 'Database connection error.',
-      code: 'UNHANDLED_EXCEPTION'
-    });
-  }
-});
-
-// GET or POST list of client bots
-const handleClientBotsStatusList = async (req: Request, res: Response) => {
-  try {
-    const records = await messengerAccountsData.getAll();
-    const clientBots = records.filter(r => r.source === 'client' || r.creationSource === 'CLIENT_SYNC');
-    const multiMgr = MultiAccountManager.getInstance();
-
-    const formattedBots = clientBots.map(r => {
-      const conn = multiMgr.getAccountConnection(r.accountId);
-      return {
-        botId: r.uid,
-        accountId: r.accountId,
-        displayName: r.displayName,
-        slotId: r.slotId,
-        status: conn ? conn.status : r.status,
-        mqttStatus: conn ? conn.mqttStatus : r.mqttStatus,
-        lastHeartbeat: r.lastHeartbeat,
-        messagesToday: r.stats?.messagesToday || 0,
-        errorsCount: r.failureReason ? 1 : 0
-      };
-    });
-
-    return res.status(200).json({
-      success: true,
-      bots: formattedBots,
-      uptime: process.uptime(),
-      memory: process.memoryUsage()
-    });
-  } catch (err: any) {
-    return res.status(200).json({
-      success: false,
-      error: err.message,
-      code: 'STATUS_FETCH_FAILED'
-    });
-  }
-};
-
-app.get('/api/client/status', requireClientAuth, handleClientBotsStatusList);
-app.post('/api/client/status', requireClientAuth, handleClientBotsStatusList);
-
-app.get('/api/client/bot/:botId', requireClientAuth, async (req: Request, res: Response) => {
-  const { botId } = req.params;
-  try {
-    const records = await messengerAccountsData.getAll();
-    const record = records.find(r => r.uid === botId || r.accountId === botId);
-
-    if (!record) {
-      return res.status(200).json({
-        success: false,
-        error: `Bot with id ${botId} not found.`,
-        code: 'BOT_NOT_FOUND'
-      });
-    }
-
-    const multiMgr = MultiAccountManager.getInstance();
-    const conn = multiMgr.getAccountConnection(record.accountId);
-
-    return res.status(200).json({
-      success: true,
-      bot: {
-        botId: record.uid,
-        accountId: record.accountId,
-        slotId: record.slotId,
-        displayName: record.displayName,
-        status: conn ? conn.status : record.status,
-        mqttStatus: conn ? conn.mqttStatus : record.mqttStatus,
-        lastHeartbeat: record.lastHeartbeat,
-        messagesToday: record.stats?.messagesToday || 0,
-        totalMessages: record.stats?.totalMessages || 0,
-        reconnects: record.reconnectCount || 0,
-        failureReason: record.failureReason || '',
-        connectionMode: record.connectionMode,
-        dbName: record.dbName,
-        collectionPrefix: record.collectionPrefix,
-        source: record.source || 'client'
-      }
-    });
-  } catch (err: any) {
-    return res.status(200).json({
-      success: false,
-      error: err.message,
-      code: 'BOT_FETCH_FAILED'
-    });
-  }
-});
-
-app.get('/api/client/logs/:botId', requireClientAuth, async (req: Request, res: Response) => {
-  const { botId } = req.params;
-  const category = req.query.category as string;
-  try {
-    const records = await messengerAccountsData.getAll();
-    const record = records.find(r => r.uid === botId || r.accountId === botId);
-
-    if (!record) {
-      return res.status(200).json({
-        success: false,
-        error: `Bot with id ${botId} not found.`,
-        code: 'BOT_NOT_FOUND'
-      });
-    }
-
-    const logs = accountRuntimeLogManager.getAccountLogs(record.accountId, category);
-    return res.status(200).json({
-      success: true,
-      accountId: record.accountId,
-      logs
-    });
-  } catch (err: any) {
-    return res.status(200).json({
-      success: false,
-      error: err.message,
-      code: 'LOGS_FETCH_FAILED'
-    });
+    return res.status(200).json({ success: false, error: err.message, code: 'DB_CONNECTION_FAILED' });
   }
 });
 
 // Test custom MongoDB connection (Always returns 200 with JSON)
 app.post('/api/messenger/database/test', requireAdminAuth, async (req: Request, res: Response) => {
-  const { mongoUri, uri } = req.body;
-  const targetUri = mongoUri || uri;
-  if (!targetUri) {
-    return res.status(200).json({ success: false, error: 'MongoDB URI is required.', code: 'MISSING_URI' });
-  }
-
   try {
-    const conn = mongoose.createConnection(targetUri, {
-      connectTimeoutMS: 5000,
-      socketTimeoutMS: 10000,
-    } as any);
-
-    const isSuccess = await new Promise<boolean>((resolve) => {
-      const timeout = setTimeout(() => {
-        resolve(false);
-      }, 5000);
-
-      conn.once('connected', () => {
-        clearTimeout(timeout);
-        resolve(true);
-      });
-
-      conn.once('error', () => {
-        clearTimeout(timeout);
-        resolve(false);
-      });
-    });
-
-    try {
-      await conn.close();
-    } catch {}
-
-    if (isSuccess) {
-      return res.status(200).json({ success: true, message: 'Database connection successful.' });
-    } else {
-      return res.status(200).json({ 
-        success: false, 
-        error: 'Failed to connect to the database. Please verify the credentials.', 
-        code: 'DB_CONNECTION_FAILED' 
-      });
+    const { firebaseRtdbService } = await import('./src/services/firebaseRtdbService');
+    const result = await firebaseRtdbService.testConnection();
+    if (result.success) {
+      return res.status(200).json({ success: true, message: 'Database connection successful (Firebase RTDB).' });
     }
-  } catch (err: any) {
-    return res.status(200).json({ 
-      success: false, 
-      error: err.message || 'Internal database test error.', 
-      code: 'UNHANDLED_EXCEPTION' 
+    return res.status(200).json({
+      success: false,
+      error: result.error || 'Failed to connect to the database. Please verify the credentials.',
+      code: 'DB_CONNECTION_FAILED'
     });
+  } catch (err: any) {
+    return res.status(200).json({ success: false, error: err.message, code: 'DB_CONNECTION_FAILED' });
   }
 });
 
@@ -3599,7 +3416,7 @@ app.get('/api/dashboard/bootstrap', async (req: Request, res: Response) => {
   try {
     const stats = botEngine.getStats();
     const sessionMeta = facebookSession.getSafeMetadata();
-    const mongoStatus = getMongoStatus();
+    const mongoStatus = getDatabaseStatus();
     const ftpConfig = await ftpConfigData.get();
 
     const enrichedStats = {
@@ -3660,7 +3477,7 @@ app.get('/api/dashboard/bootstrap', async (req: Request, res: Response) => {
 app.get('/api/bot/stats', async (req: Request, res: Response) => {
   const stats = botEngine.getStats();
   const sessionMeta = facebookSession.getSafeMetadata();
-  const mongoStatus = getMongoStatus();
+  const mongoStatus = getDatabaseStatus();
   const ftpConfig = await ftpConfigData.get();
 
   res.json({
@@ -4213,7 +4030,7 @@ app.post('/api/bot/brain/memories', async (req: Request, res: Response) => {
     const cleanTrigger = stripEmojiFormatters(trigger.toLowerCase().trim());
     const normResult = await brainService.aiNormalize(cleanTrigger, reply);
 
-    const memory = new BrainMemoryModel({
+    const memory = await BrainMemoryModel.create({
       trigger: cleanTrigger,
       variations: normResult.variations,
       aiNormalizedTrigger: normResult.aiNormalizedTrigger,
@@ -4332,7 +4149,7 @@ app.post('/api/bot/brain/suggestions/:id/approve', async (req: Request, res: Res
     }
 
     if (!memory) {
-      memory = new BrainMemoryModel({
+      memory = await BrainMemoryModel.create({
         trigger: cleanTrigger,
         variations: normResult.variations,
         aiNormalizedTrigger: normResult.aiNormalizedTrigger,
@@ -4441,7 +4258,7 @@ app.post('/api/bot/brain/inferred-attributes', async (req: Request, res: Respons
       attr.confidence = typeof confidence === 'number' ? confidence : attr.confidence;
       await attr.save();
     } else {
-      attr = new InferredAttributeModel({
+      attr = await InferredAttributeModel.create({
         threadID,
         userID,
         userName: userName || '',
@@ -4539,21 +4356,11 @@ app.post('/api/system/restart', requireAdminAuth, async (req: Request, res: Resp
 
 // --- SUPABASE MANAGEMENT ENDPOINTS ---
 
+// Client bots are stored in Firebase RTDB now (Supabase removed).
+// Endpoint paths are kept so the dashboard keeps working unchanged.
 app.get('/api/supabase/client-bots', requireAdminAuth, async (req: Request, res: Response) => {
-  if (!supabaseService.isConfigured()) {
-    return res.json({ bots: [] });
-  }
-  
-  const client = supabaseService.getClient();
   try {
-    const { data: sessions, error } = await client
-      .from('client_bot_sessions')
-      .select('*, client_bot_metrics(*), client_bot_heartbeats(*)');
-      
-    if (error) {
-      throw error;
-    }
-
+    const sessions = await clientBotsManager.listSessions();
     res.json({ bots: sessions || [] });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
@@ -4562,16 +4369,13 @@ app.get('/api/supabase/client-bots', requireAdminAuth, async (req: Request, res:
 
 app.get('/api/supabase/config', requireAdminAuth, (req: Request, res: Response) => {
   try {
-    const config = supabaseService.getConfig();
-    // Mask serviceRoleKey for safety
-    const maskedConfig = {
-      projectUrl: config.projectUrl,
-      anonKey: config.anonKey ? '••••••••••••••••••••' : '',
-      serviceRoleKey: config.serviceRoleKey ? '••••••••••••••••••••' : '',
-      dbConnectionString: config.dbConnectionString ? '••••••••••••••••••••' : '',
-      realtimeEnabled: config.realtimeEnabled ?? true
-    };
-    res.json(maskedConfig);
+    res.json({
+      projectId: 'shipu-ai',
+      databaseURL: 'https://shipu-ai-default-rtdb.firebaseio.com',
+      root: 'shipu-messsenger-bot/client-bots',
+      store: 'Firebase RTDB',
+      realtimeEnabled: true
+    });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }
@@ -4606,30 +4410,9 @@ app.post('/api/supabase/client-bots/:botId/restart', requireAdminAuth, async (re
 
 app.post('/api/supabase/config', requireAdminAuth, async (req: Request, res: Response) => {
   try {
-    const { projectUrl, anonKey, serviceRoleKey, dbConnectionString, realtimeEnabled, networkMode } = req.body;
-    
-    const updates: any = {};
-    if (projectUrl !== undefined) updates.projectUrl = projectUrl;
-    if (anonKey !== undefined && anonKey !== '••••••••••••••••••••') updates.anonKey = anonKey;
-    // Only update serviceRoleKey if it's not the masked placeholder
-    if (serviceRoleKey !== undefined && serviceRoleKey !== '••••••••••••••••••••') {
-      updates.serviceRoleKey = serviceRoleKey;
-    }
-    if (dbConnectionString !== undefined && dbConnectionString !== '••••••••••••••••••••') {
-      updates.dbConnectionString = dbConnectionString;
-    }
-    if (realtimeEnabled !== undefined) updates.realtimeEnabled = realtimeEnabled;
-    if (networkMode !== undefined) updates.networkMode = networkMode;
-
-    await supabaseService.saveConfig(updates);
-    
-    // Auto-restart real-time client listeners if configured
-    if (supabaseService.isConfigured()) {
-      clientBotsManager.startRealtimeSubscriptions();
-    }
-    
-    auditLogsData.add('admin', 'Updated Supabase Configuration', undefined, 'SUCCESS');
-    res.json({ success: true, message: 'Configuration saved successfully.' });
+    clientBotsManager.startRealtimeSubscriptions();
+    auditLogsData.add('admin', 'Updated Client Bots Configuration (Firebase)', undefined, 'SUCCESS');
+    res.json({ success: true, message: 'Configuration saved successfully (Firebase RTDB is hardcoded).' });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }
@@ -4637,8 +4420,8 @@ app.post('/api/supabase/config', requireAdminAuth, async (req: Request, res: Res
 
 app.get('/api/supabase/status', requireAdminAuth, async (req: Request, res: Response) => {
   try {
-    const status = await supabaseService.getStatusDetails();
-    res.json(status);
+    const result = await clientBotsManager.testConnection();
+    res.json({ configured: result.success, connected: result.success, store: 'Firebase RTDB', error: result.error || null });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }
@@ -4646,10 +4429,10 @@ app.get('/api/supabase/status', requireAdminAuth, async (req: Request, res: Resp
 
 app.post('/api/supabase/test-connection', requireAdminAuth, async (req: Request, res: Response) => {
   try {
-    const result = await supabaseService.testConnection();
+    const result = await clientBotsManager.testConnection();
     const logs = ['Starting connection test...'];
     if (result.success) {
-      logs.push(`Connection successful! Latency: ${result.latency}ms`);
+      logs.push('Connection successful! (Firebase RTDB)');
       res.json({ success: true, message: 'Connection test passed', logs, ...result });
     } else {
       logs.push(`Connection failed: ${result.error}`);
@@ -4662,12 +4445,8 @@ app.post('/api/supabase/test-connection', requireAdminAuth, async (req: Request,
 
 app.post('/api/supabase/initialize-db', requireAdminAuth, async (req: Request, res: Response) => {
   try {
-    const result = await supabaseService.initializeDatabase();
-    if (result.success) {
-      auditLogsData.add('admin', 'Initialized Supabase Database', undefined, 'SUCCESS');
-    } else {
-      auditLogsData.add('admin', 'Failed Supabase Database Init', undefined, 'ERROR');
-    }
+    const result = await clientBotsManager.testConnection();
+    auditLogsData.add('admin', result.success ? 'Verified Firebase Client Bots store' : 'Failed Client Bots store check', undefined, result.success ? 'SUCCESS' : 'ERROR');
     res.json(result);
   } catch (err: any) {
     res.status(500).json({ error: err.message });
@@ -4677,8 +4456,8 @@ app.post('/api/supabase/initialize-db', requireAdminAuth, async (req: Request, r
 app.post('/api/supabase/reconnect', requireAdminAuth, async (req: Request, res: Response) => {
   try {
     clientBotsManager.startRealtimeSubscriptions();
-    auditLogsData.add('admin', 'Reconnected Supabase Realtime Listener', undefined, 'SUCCESS');
-    res.json({ success: true, message: 'Realtime channels successfully re-subscribed.' });
+    auditLogsData.add('admin', 'Reconnected Client Bots watcher', undefined, 'SUCCESS');
+    res.json({ success: true, message: 'Watcher successfully restarted.' });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }
@@ -4686,14 +4465,24 @@ app.post('/api/supabase/reconnect', requireAdminAuth, async (req: Request, res: 
 
 app.post('/api/supabase/clear-queue', requireAdminAuth, async (req: Request, res: Response) => {
   try {
-    if (supabaseService.isConfigured()) {
-      const client = supabaseService.getClient();
-      const { error } = await client.from('client_bot_queue').delete().neq('status', 'processing');
-      if (error) throw error;
-      auditLogsData.add('admin', 'Cleared Supabase Client Queue', undefined, 'SUCCESS');
-      res.json({ success: true, message: 'Queue successfully cleared.' });
-    } else {
-      res.status(400).json({ error: 'Supabase is not configured.' });
+    const { firebaseConfig, FIREBASE_BOT_ROOT } = await import('./src/config/firebase');
+    const base = (firebaseConfig.databaseURL || '').replace(/\/+$/, '');
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 15000);
+    try {
+      const listRes = await fetch(`${base}/${FIREBASE_BOT_ROOT}/client-bots/queue.json`, { signal: ctrl.signal });
+      const queue = (await listRes.json()) || {};
+      let cleared = 0;
+      for (const [id, item] of Object.entries<any>(queue)) {
+        if (item && item.status !== 'processing') {
+          await fetch(`${base}/${FIREBASE_BOT_ROOT}/client-bots/queue/${encodeURIComponent(id)}.json`, { method: 'DELETE', signal: ctrl.signal });
+          cleared++;
+        }
+      }
+      auditLogsData.add('admin', 'Cleared Client Bots queue', undefined, 'SUCCESS');
+      res.json({ success: true, message: `Queue successfully cleared (${cleared} item(s)).` });
+    } finally {
+      clearTimeout(timer);
     }
   } catch (err: any) {
     res.status(500).json({ error: err.message });
@@ -5217,7 +5006,7 @@ app.post('/api/aios/sessions/start-test', async (req: Request, res: Response) =>
     await AIOSSessionModel.updateMany({ userID, status: 'active' }, { $set: { status: 'expired' } });
 
     const expiresAt = new Date(Date.now() + 10 * 60 * 1000);
-    const session = new AIOSSessionModel({
+    const session = await AIOSSessionModel.create({
       sessionID: `sess_${Date.now()}`,
       userID,
       threadID,

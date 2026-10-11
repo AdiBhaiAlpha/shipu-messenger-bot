@@ -1,5 +1,5 @@
-import mongoose from 'mongoose';
-import { BrainMemoryModel, BrainSuggestionModel, InferredAttributeModel, UserModel } from '../db/mongodb';
+import { isDatabaseConnected } from '../db/firebaseDb';
+import { BrainMemoryModel, BrainSuggestionModel, InferredAttributeModel, UserModel } from '../db/firebaseDb';
 import { GoogleGenAI, Type } from '@google/genai';
 
 // Fuzzy Matching Helper Functions
@@ -94,8 +94,8 @@ export class BrainService {
 
   public async loadMemoriesToCache() {
     try {
-      if (mongoose.connection.readyState !== 1) {
-        console.warn('[BrainService] MongoDB not connected, using empty cache for now.');
+      if (!isDatabaseConnected()) {
+        console.warn('[BrainService] Database not connected, using empty cache for now.');
         this.memoryCache = [];
         return;
       }
@@ -1012,7 +1012,7 @@ Return JSON:
 
         } else {
           // No existing record, safe to create
-          const newAttr = new InferredAttributeModel({
+          const newAttr = await InferredAttributeModel.create({
             threadID,
             userID,
             userName: userName || '',

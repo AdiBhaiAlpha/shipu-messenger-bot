@@ -1,4 +1,4 @@
-import { UserModel, EconomyTransactionModel, EconomyConfigModel } from '../db/mongodb';
+import { UserModel, EconomyTransactionModel, EconomyConfigModel } from '../db/firebaseDb';
 import { usersData } from '../db/database';
 import { botEngine } from '../core/botEngine';
 

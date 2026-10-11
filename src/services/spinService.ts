@@ -1,20 +1,8 @@
-import mongoose from 'mongoose';
 import { economyService } from './economyService';
 import { createCanvas } from '@napi-rs/canvas';
+import { UserSpinModel } from '../db/firebaseDb';
 
-const userSpinSchema = new mongoose.Schema({
-  userID: { type: String, required: true, unique: true },
-  name: { type: String, default: '' },
-  dateString: { type: String, default: '' },
-  spinsUsedToday: { type: Number, default: 0 },
-  totalSpins: { type: Number, default: 0 },
-  totalCoinsWon: { type: Number, default: 0 },
-  jackpotCount: { type: Number, default: 0 },
-  lastSpinAt: { type: Date, default: null },
-  history: { type: [Object], default: [] }
-}, { timestamps: true });
-
-export const UserSpinModel = mongoose.models.UserSpin || mongoose.model('UserSpin', userSpinSchema);
+export { UserSpinModel };
 
 export interface SpinResult {
   success: boolean;

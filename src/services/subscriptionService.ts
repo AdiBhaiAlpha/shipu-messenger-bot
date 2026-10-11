@@ -1,4 +1,4 @@
-import { SubscriptionModel, SubscriptionPaymentModel } from '../db/mongodb';
+import { SubscriptionModel, SubscriptionPaymentModel } from '../db/firebaseDb';
 import { economyService } from './economyService';
 import { messengerLogger } from '../adapters/messenger/MessengerLogger';
 

@@ -32,8 +32,7 @@ export function loadFcaConfig(forceReload = false): FcaConfig {
   if (cached && !forceReload) return cached;
 
   const candidates = [
-    path.join(process.cwd(), 'fca-config.json'),
-    path.resolve(__dirname, '..', '..', '..', 'fca-config.json')
+    path.join(process.cwd(), 'fca-config.json')
   ];
 
   for (const candidate of candidates) {

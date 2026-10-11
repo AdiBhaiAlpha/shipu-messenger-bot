@@ -1,5 +1,5 @@
-import mongoose from 'mongoose';
 import { ShiPuUser, ShiPuThread, BotConfig } from '../types/shipu';
+import { isDatabaseConnected } from './firebaseDb';
 import {
   UserModel,
   ThreadModel,
@@ -11,9 +11,9 @@ import {
   MessengerAccountModel,
   PersonalAIAccountModel,
   TelegramConfigModel,
-  connectMongoDB,
+  connectDatabase,
   executeFallback
-} from './mongodb';
+} from './firebaseDb';
 import { TelegramConfigRecord } from '../types/telegram';
 
 export interface MessengerAccountRecord {
@@ -98,13 +98,14 @@ export interface FtpConfigRecord {
   updatedBy: string;
 }
 
-// Ensure MongoDB is connected before query
+// Ensure Firebase RTDB is connected before query
 async function ensureDb() {
   try {
-    if (mongoose.connection.readyState === 1) {
+    if (isDatabaseConnected()) {
       return { connected: true };
     }
-    const status = await connectMongoDB();
+    const status = await connectDatabase();
+    return status;
     return status;
   } catch (err: any) {
     return { connected: false, error: err.message || String(err) };
@@ -515,7 +516,7 @@ export const settingsData = {
 export const auditLogsData = {
   add: async (admin: string, action: string, target?: string, result: string = 'SUCCESS'): Promise<void> => {
     try {
-      const status = await connectMongoDB();
+      const status = await connectDatabase();
       if (!status.connected) {
         console.warn(`[AUDIT] Skipping log due to DB disconnect: ${action}`);
         return;
@@ -632,7 +633,10 @@ export const commandsData = {
   seedDefaultsIfEmpty: async (defaultSeeds: StoredCommandData[]): Promise<void> => {
     await ensureDb();
     try {
-      await StoredCommandModel.deleteMany({});
+      // Only seed when the collection is truly empty. Previously this wiped
+      // every stored (including user-installed) command on each boot.
+      const existingCount = await StoredCommandModel.countDocuments();
+      if (existingCount > 0) return;
       for (const seed of defaultSeeds) {
         await commandsData.set(seed.name, seed);
       }

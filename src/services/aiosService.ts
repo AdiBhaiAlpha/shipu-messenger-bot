@@ -1,6 +1,6 @@
 import { GoogleGenAI, Type } from '@google/genai';
 import { isBotMessageId } from '../utils/commandParser';
-import { AIOSSessionModel, AIOSMemoryModel, AIOSUsageModel, UserModel, ThreadModel, InferredAttributeModel } from '../db/mongodb';
+import { AIOSSessionModel, AIOSMemoryModel, AIOSUsageModel, UserModel, ThreadModel, InferredAttributeModel } from '../db/firebaseDb';
 import { brainService } from './brainService';
 import { smartConversationBrain } from '../core/smartConversationBrain';
 import { multiAccountManager } from '../adapters/messenger/MultiAccountManager';
@@ -57,10 +57,10 @@ export class AIOSService {
 
     this.checkInterval = setInterval(async () => {
       try {
-        // Skip if database is not connected to avoid "bufferCommands = false" errors
-        const { UserModel } = await import('../db/mongodb');
-        const mongoose = await import('mongoose');
-        if (mongoose.default.connection.readyState !== 1) return;
+        // Skip if database is not connected
+        const { UserModel } = await import('../db/firebaseDb');
+        const { isDatabaseConnected } = await import('../db/firebaseDb');
+        if (!isDatabaseConnected()) return;
 
         const now = new Date();
         const activeSessions = await (AIOSSessionModel as any).find({ status: 'active' });
@@ -506,7 +506,7 @@ export class AIOSService {
       // Handle AI Tool Execution if requested
       if (resObj.actionToExecute && resObj.actionToExecute.action) {
         const toolAct = resObj.actionToExecute;
-        const { UserModel, ThreadMemoryModel, BrainMemoryModel } = await import('../db/mongodb');
+        const { UserModel, ThreadMemoryModel, BrainMemoryModel } = await import('../db/firebaseDb');
 
         try {
           if (toolAct.action === 'get_balance') {

@@ -69,7 +69,7 @@ export class FCAAuthErrorClassifier {
     ) {
       return {
         category: 'ACCOUNT_RESTRICTED',
-        isHardFailure: false,
+        isHardFailure: true,
         sanitizedReason: 'Facebook account restricted, locked, or login blocked by safety filters',
         providerName,
         userActionRequired: 'Log into Facebook on web browser to review and appeal account restriction status'
@@ -87,7 +87,7 @@ export class FCAAuthErrorClassifier {
       };
     }
 
-    // Invalid AppState / Session Expired (Allow fallback providers to attempt authentication before marking terminal)
+    // Invalid AppState / Session Expired
     if (
       errStr.includes('session expired') ||
       errStr.includes('cookie expired') ||
@@ -106,8 +106,8 @@ export class FCAAuthErrorClassifier {
     ) {
       return {
         category: 'SESSION_EXPIRED',
-        isHardFailure: false,
-        sanitizedReason: 'Session credentials (c_user/xs/datr) expired or rejected by Facebook endpoint',
+        isHardFailure: true,
+        sanitizedReason: 'Session credentials (c_user/xs/datr) expired or revoked by Facebook auth server',
         providerName,
         userActionRequired: 'Export a fresh Cookie-Editor AppState from an active, logged-in Facebook browser session'
       };
@@ -135,11 +135,11 @@ export class FCAAuthErrorClassifier {
       };
     }
 
-    // Default Fallback (allow next provider to try)
+    // Default Fallback
     const cleanMsg = (err?.message || err?.error || errStr).slice(0, 150);
     return {
       category: 'UNKNOWN_AUTH_ERROR',
-      isHardFailure: false,
+      isHardFailure: true,
       sanitizedReason: `Facebook login rejected: ${cleanMsg}`,
       providerName,
       userActionRequired: 'Export a fresh AppState from active browser session and upload to dashboard'

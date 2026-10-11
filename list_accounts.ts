@@ -1,8 +1,8 @@
 import { messengerAccountsData } from './src/db/database';
-import { connectMongoDB } from './src/db/mongodb';
+import { connectDatabase } from './src/db/firebaseDb';
 
 async function list() {
-    await connectMongoDB();
+    await connectDatabase();
     const accounts = await messengerAccountsData.getAll();
     console.log(JSON.stringify(accounts, null, 2));
     process.exit(0);

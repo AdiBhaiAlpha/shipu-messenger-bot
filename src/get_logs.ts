@@ -1,7 +1,7 @@
-import { connectMongoDB, AILogModel } from './db/mongodb';
+import { connectDatabase, AILogModel } from './db/firebaseDb';
 
 async function run() {
-  await connectMongoDB();
+  await connectDatabase();
   const logs = await AILogModel.find().sort({ timestamp: -1 }).limit(10);
   console.log('--- LAST 10 AI LOGS ---');
   for (const log of logs) {

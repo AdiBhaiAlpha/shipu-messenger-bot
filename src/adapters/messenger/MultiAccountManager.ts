@@ -1,43 +1,21 @@
 import { AccountConnection, SafeAccountMeta } from './AccountConnection';
 import { messengerAccountsData, MessengerAccountRecord, ftpConfigData } from '../../db/database';
 import { CookieLoader } from './CookieLoader';
+import { coerceAppState } from './fca/normalizeAppState';
 import { FCAFallbackManager } from './fca/FCAFallbackManager';
 import { messengerLogger, MessengerLogger } from './MessengerLogger';
-import { encryptAuthState, encryptPassword, decryptAuthState } from '../../utils/crypto';
+import { encryptAuthState, decryptAuthState } from '../../utils/crypto';
 import { IMessengerAdapter, MessengerAdapterImpl } from './MessengerAdapter';
 import { writeFtpFileContent, readFtpFileContent } from '../../services/ftpService';
-import mongoose from 'mongoose';
+import { isDatabaseConnected } from '../../db/firebaseDb';
 
-export async function testMongoConnection(uri: string): Promise<boolean> {
-  let conn: mongoose.Connection | undefined = undefined;
-  try {
-    conn = mongoose.createConnection(uri, {
-      connectTimeoutMS: 5000,
-      socketTimeoutMS: 10000,
-    } as any);
-    await new Promise<void>((resolve, reject) => {
-      const timeout = setTimeout(() => {
-        reject(new Error('Connection timeout'));
-      }, 5000);
-      conn!.once('connected', () => {
-        clearTimeout(timeout);
-        resolve();
-      });
-      conn!.once('error', (err) => {
-        clearTimeout(timeout);
-        reject(err);
-      });
-    });
-    return true;
-  } catch {
-    return false;
-  } finally {
-    if (conn) {
-      try {
-        await conn.close();
-      } catch {}
-    }
-  }
+/**
+ * Custom MongoDB URIs were removed with the MongoDB layer. Firebase RTDB is
+ * the only database now, so this is a connectivity probe against it.
+ * Kept (same name/signature) so existing call sites keep compiling.
+ */
+export async function testMongoConnection(_uri?: string): Promise<boolean> {
+  return isDatabaseConnected();
 }
 
 
@@ -488,23 +466,31 @@ export class MultiAccountManager {
       };
     }
 
-    // 3. Pre-save Connection Validation for custom MongoDB settings
-    let encryptedMongoUri = '';
+    // 3. Custom MongoDB mode was removed: Firebase RTDB is the only store.
+    // A 'custom' request is served on the default Firebase connection instead.
     if (connectionMode === 'custom') {
-      if (!mongoUri) {
-        return { success: false, error: 'Custom MongoDB URI is required for custom connection mode.' };
-      }
-      messengerLogger.info('AUTH', `Testing custom MongoDB connection for account ${accountId}...`);
-      const isDbValid = await testMongoConnection(mongoUri);
-      if (!isDbValid) {
-        return { success: false, error: 'Database connection verification failed. Please check your MongoDB URI, network access, or credentials.' };
-      }
-      encryptedMongoUri = encryptPassword(mongoUri);
+      messengerLogger.info('AUTH', `Custom MongoDB mode removed; using default Firebase connection for account ${accountId}...`);
+      connectionMode = 'default';
     }
+    const encryptedMongoUri = '';
 
     // 4. Authenticate against Facebook FCA before saving
     messengerLogger.info('AUTH', `Testing Facebook authentication for UID ${MessengerLogger.maskUid(uid)}...`);
-    const parsedCookies = JSON.parse(cookieJson);
+    let parsedCookies: any[];
+    try {
+      parsedCookies = coerceAppState(cookieJson);
+    } catch (parseErr: any) {
+      return {
+        success: false,
+        error: 'Cookie JSON could not be parsed. Export the appstate again from a logged-in facebook.com tab.'
+      };
+    }
+    if (!parsedCookies || parsedCookies.length === 0) {
+      return {
+        success: false,
+        error: 'Cookie JSON contains no usable cookies. Export the appstate again from a logged-in facebook.com tab.'
+      };
+    }
     const authResult = await this.fallbackManager.authenticate(parsedCookies);
 
     if (!authResult.connection) {
@@ -555,6 +541,19 @@ export class MultiAccountManager {
     this.setMongoBackupStatus(accountId, 'HEALTHY');
     this.setPersistentSession(accountId, 'SAVED');
 
+    // Durable copy in Firebase RTDB (shipu-messsenger-bot/messenger-accounts).
+    // This is the restart-proof session store read back on every boot.
+    try {
+      const { firebaseRtdbService } = await import('../../services/firebaseRtdbService');
+      const stored = await messengerAccountsData.get(accountId);
+      if (stored) {
+        const { ...record } = stored as any;
+        await firebaseRtdbService.saveSession(accountId, record);
+      }
+    } catch (fbErr: any) {
+      messengerLogger.warn('AUTH', `Firebase RTDB mirror failed for ${accountId}: ${fbErr?.message || fbErr}`);
+    }
+
     if (this.accounts.has(accountId)) {
       await this.accounts.get(accountId)?.disconnect();
     }
@@ -564,10 +563,12 @@ export class MultiAccountManager {
       connection.registerEventListener(listener);
     }
 
-    // Reuse already authenticated FCA connection from step 4 instead of repeating login
+    // Reuse already authenticated FCA connection from step 4 instead of repeating login.
+    // connect() sees sessionState.authenticated and only (re)starts the MQTT
+    // listener through the full state machine — no second Facebook login.
     connection.setFcaConnection(authResult.connection, authResult.activeProviderName);
     this.accounts.set(accountId, connection);
-    connection.startMqttListener();
+    await connection.connect();
 
     // 6. Register/update known state in CloudAccountManager so polling knows it is active
     try {
@@ -671,6 +672,12 @@ export class MultiAccountManager {
     }
 
     const deleted = await messengerAccountsData.delete(accountId);
+
+    // Remove the durable Firebase copy as well (best-effort).
+    try {
+      const { firebaseRtdbService } = await import('../../services/firebaseRtdbService');
+      await firebaseRtdbService.deleteSession(accountId);
+    } catch {}
 
     // If deleting the last remaining account, remove root appstate_cookie.json
     if (this.accounts.size === 0) {

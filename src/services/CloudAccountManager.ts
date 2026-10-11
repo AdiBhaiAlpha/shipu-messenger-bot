@@ -1,4 +1,3 @@
-import { MessengerAccountModel } from '../db/mongodb';
 import { messengerAccountsData, MessengerAccountRecord, ftpConfigData } from '../db/database';
 import { MultiAccountManager } from '../adapters/messenger/MultiAccountManager';
 import { AccountConnection, SafeAccountMeta } from '../adapters/messenger/AccountConnection';
@@ -8,7 +7,7 @@ import { FCAConnection } from '../adapters/messenger/fca/FCAProvider';
 import { coerceAppState } from '../adapters/messenger/fca/normalizeAppState';
 import { messengerLogger, MessengerLogger } from '../adapters/messenger/MessengerLogger';
 import { decryptAuthState, encryptAuthState } from '../utils/crypto';
-import mongoose from 'mongoose';
+import { isDatabaseConnected } from '../db/firebaseDb';
 import { listFtpFiles, readFtpFileContent, writeFtpFileContent } from './ftpService';
 
 export interface CloudDashboardStats {
@@ -45,13 +44,13 @@ export class CloudAccountManager {
   }
 
   /**
-   * 1. loadAccounts(): The bot starts by loading every ACTIVE account stored inside MongoDB.
+   * 1. loadAccounts(): The bot starts by loading every ACTIVE account stored inside database.
    */
   public async loadAccounts(): Promise<void> {
     messengerLogger.info('CLOUD_SYNC', 'Starting Centralized Cloud Account Synchronization System...');
     
     const multiMgr = MultiAccountManager.getInstance();
-    const isMongoAvailable = mongoose.connection.readyState === 1;
+    const isDbAvailable = isDatabaseConnected();
     let activeRecords: MessengerAccountRecord[] = [];
 
     const getFtpOptions = async () => {
@@ -76,15 +75,15 @@ export class CloudAccountManager {
       };
     };
 
-    if (isMongoAvailable) {
-      messengerLogger.info('CLOUD_SYNC', 'MongoDB is ONLINE. Synchronizing and repairing backups with FTP...');
+    if (isDbAvailable) {
+      messengerLogger.info('CLOUD_SYNC', 'database is ONLINE. Synchronizing and repairing backups with FTP...');
       const records = await messengerAccountsData.getAll();
-      messengerLogger.info('CLOUD_SYNC', `Found ${records.length} total Messenger account records in MongoDB.`);
+      messengerLogger.info('CLOUD_SYNC', `Found ${records.length} total Messenger account records in database.`);
       
       console.log('RECORDS FROM MONGODB:', JSON.stringify(records));
       
       if (records.length === 0) {
-        messengerLogger.info('CLOUD_SYNC', 'No records found in MongoDB. Checking FTP.');
+        messengerLogger.info('CLOUD_SYNC', 'No records found in database. Checking FTP.');
       }
 
       try {
@@ -108,8 +107,8 @@ export class CloudAccountManager {
                     const existingTime = existing?.updatedAt || 0;
 
                     if (!existing) {
-                      // Missing in MongoDB! Restore it!
-                      messengerLogger.warn('CLOUD_SYNC', `Account ${accountId} missing in MongoDB. Restoring from FTP backup...`);
+                      // Missing in database! Restore it!
+                      messengerLogger.warn('CLOUD_SYNC', `Account ${accountId} missing in database. Restoring from FTP backup...`);
                       await messengerAccountsData.upsert({
                         accountId: backup.accountId,
                         uid: backup.uid,
@@ -141,7 +140,7 @@ export class CloudAccountManager {
                       multiMgr.setPersistentSession(accountId, 'SAVED');
                     } else if (backupTime > existingTime) {
                       // FTP backup is newer! Restore it!
-                      messengerLogger.warn('CLOUD_SYNC', `FTP backup for ${accountId} is newer than MongoDB. Restoring newer session...`);
+                      messengerLogger.warn('CLOUD_SYNC', `FTP backup for ${accountId} is newer than database. Restoring newer session...`);
                       await messengerAccountsData.upsert({
                         accountId: backup.accountId,
                         uid: backup.uid,
@@ -173,8 +172,8 @@ export class CloudAccountManager {
                       multiMgr.setFtpBackupStatus(accountId, 'HEALTHY');
                       multiMgr.setPersistentSession(accountId, 'SAVED');
                     } else if (existingTime > backupTime) {
-                      // MongoDB record is newer! Repair/rewrite the stale FTP backup!
-                      messengerLogger.info('CLOUD_SYNC', `MongoDB record for ${accountId} is newer than FTP. Repairing FTP backup...`);
+                      // database record is newer! Repair/rewrite the stale FTP backup!
+                      messengerLogger.info('CLOUD_SYNC', `database record for ${accountId} is newer than FTP. Repairing FTP backup...`);
                       await multiMgr.backupAccountToFtp(accountId);
                       multiMgr.setMongoBackupStatus(accountId, 'HEALTHY');
                       multiMgr.setFtpBackupStatus(accountId, 'HEALTHY');
@@ -202,7 +201,7 @@ export class CloudAccountManager {
             }
           }
         } else {
-          messengerLogger.error('CLOUD_SYNC', `FTP directory list failed: ${ftpFilesRes.error}. Running in MongoDB-only mode.`);
+          messengerLogger.error('CLOUD_SYNC', `FTP directory list failed: ${ftpFilesRes.error}. Running in database-only mode.`);
           for (const record of records) {
             multiMgr.setFtpBackupStatus(record.accountId, 'FAILED');
             multiMgr.setMongoBackupStatus(record.accountId, 'HEALTHY');
@@ -218,7 +217,7 @@ export class CloudAccountManager {
 
       activeRecords = records.filter(r => (r.botEnabled ?? true) && (r.enabled ?? true) && r.loginStatus !== 'LOGGED_OUT' && r.status !== 'DISABLED' && r.source !== 'client' && r.creationSource !== 'CLIENT_SYNC');
     } else {
-      messengerLogger.error('CLOUD_SYNC', 'MongoDB is OFFLINE during startup! Initiating cPanel FTP restore sequence...');
+      messengerLogger.error('CLOUD_SYNC', 'database is OFFLINE during startup! Initiating cPanel FTP restore sequence...');
       
       try {
         const ftpOptions = await getFtpOptions();
@@ -274,21 +273,21 @@ export class CloudAccountManager {
           }
         }
       } catch (ftpErr: any) {
-        messengerLogger.error('CLOUD_SYNC', `FTP scan failed during MongoDB offline: ${ftpErr.message}`);
+        messengerLogger.error('CLOUD_SYNC', `FTP scan failed during database offline: ${ftpErr.message}`);
       }
 
-      // Start the offline auto-restore polling loop once MongoDB becomes available again
+      // Start the offline auto-restore polling loop once database becomes available again
       const restoreInterval = setInterval(async () => {
-        if (mongoose.connection.readyState === 1) {
-          messengerLogger.success('CLOUD_SYNC', 'MongoDB has reconnected! Restoring FTP session data to MongoDB...');
+        if (isDatabaseConnected()) {
+          messengerLogger.success('CLOUD_SYNC', 'database has reconnected! Restoring FTP session data to database...');
           clearInterval(restoreInterval);
           for (const record of activeRecords) {
             try {
               await messengerAccountsData.upsert(record);
               multiMgr.setMongoBackupStatus(record.accountId, 'HEALTHY');
-              messengerLogger.info('CLOUD_SYNC', `Successfully saved restored account ${record.accountId} back to MongoDB.`);
+              messengerLogger.info('CLOUD_SYNC', `Successfully saved restored account ${record.accountId} back to database.`);
             } catch (mongoSaveErr: any) {
-              messengerLogger.error('CLOUD_SYNC', `Failed to save restored account ${record.accountId} to MongoDB: ${mongoSaveErr.message}`);
+              messengerLogger.error('CLOUD_SYNC', `Failed to save restored account ${record.accountId} to database: ${mongoSaveErr.message}`);
             }
           }
         }
@@ -322,97 +321,22 @@ export class CloudAccountManager {
   }
 
   /**
-   * 2. watchDatabase(): Monitors MongoDB for account changes via Change Streams or intelligent polling.
+   * 2. watchDatabase(): Monitors the database for account changes via
+   * intelligent polling (Firebase RTDB REST has no change streams).
    */
   public async watchDatabase(): Promise<void> {
     if (this.isWatching) return;
     this.isWatching = true;
 
-    try {
-      messengerLogger.info('CLOUD_SYNC', 'Attempting to subscribe to MongoDB Change Streams...');
-      this.changeStream = MessengerAccountModel.watch([], { fullDocument: 'updateLookup' });
-
-      this.changeStream.on('change', async (change: any) => {
-        try {
-          const operationType = change.operationType;
-          messengerLogger.info('CLOUD_SYNC', `MongoDB Change Stream event detected: [${operationType}]`);
-
-          if (operationType === 'insert') {
-            const doc = change.fullDocument;
-            if (doc && doc.accountId) {
-              const isEnabled = (doc.botEnabled ?? true) && (doc.enabled ?? true);
-              this.knownAccountState.set(doc.accountId, {
-                updatedAt: doc.updatedAt || Date.now(),
-                encryptedState: doc.encryptedAuthState || '',
-                enabled: isEnabled
-              });
-              messengerLogger.info('CLOUD_SYNC', `Cloud Sync detected new account [${doc.accountId}] added to MongoDB remotely`);
-              if (isEnabled) {
-                await this.startAccount(doc.accountId);
-              }
-            }
-          } else if (operationType === 'update' || operationType === 'replace') {
-            const doc = change.fullDocument;
-            if (doc && doc.accountId) {
-              const cached = this.knownAccountState.get(doc.accountId);
-              const isEnabled = (doc.botEnabled ?? true) && (doc.enabled ?? true);
-              const cookieChanged = !cached || cached.encryptedState !== doc.encryptedAuthState;
-              const enabledChanged = !cached || cached.enabled !== isEnabled;
-
-              this.knownAccountState.set(doc.accountId, {
-                updatedAt: doc.updatedAt || Date.now(),
-                encryptedState: doc.encryptedAuthState || '',
-                enabled: isEnabled
-              });
-
-              if (!isEnabled && enabledChanged) {
-                messengerLogger.info('CLOUD_SYNC', `Account [${doc.accountId}] was disabled in database. Stopping runtime...`);
-                await this.stopAccount(doc.accountId);
-              } else if (cookieChanged) {
-                messengerLogger.info('CLOUD_SYNC', `Cloud Sync detected cookie update for account [${doc.accountId}]. Re-authenticating...`);
-                await this.reloadAccount(doc.accountId, true);
-              } else if (enabledChanged && isEnabled) {
-                messengerLogger.info('CLOUD_SYNC', `Cloud Sync detected account [${doc.accountId}] enabled in database. Starting...`);
-                await this.startAccount(doc.accountId);
-              } else {
-                // Non-auth update (e.g. status, mqttStatus, heartbeat, or AI flags) — update in-memory record without resetting session
-                const conn = MultiAccountManager.getInstance().getAccountConnection(doc.accountId);
-                if (conn) {
-                  conn.updateRecord(doc);
-                }
-              }
-            }
-          } else if (operationType === 'delete') {
-            const documentKey = change.documentKey;
-            // Lookup by _id if needed or find cached accountId
-            for (const [accId, state] of this.knownAccountState.entries()) {
-              const rec = await messengerAccountsData.get(accId);
-              if (!rec) {
-                messengerLogger.warn('CLOUD_SYNC', `Cloud Sync detected account deletion [${accId}] in MongoDB`);
-                await this.removeAccount(accId);
-              }
-            }
-          }
-        } catch (err: any) {
-          messengerLogger.error('CLOUD_SYNC', `Error processing Change Stream event: ${err.message}`);
-        }
-      });
-
-      this.changeStream.on('error', (err: any) => {
-        messengerLogger.warn('CLOUD_SYNC', `MongoDB Change Stream unavailable: ${err.message}. Falling back to intelligent polling.`);
-        this.fallbackToPolling();
-      });
-
-    } catch (err: any) {
-      messengerLogger.warn('CLOUD_SYNC', `Change Stream initialization skipped (${err.message}). Using intelligent polling.`);
-      this.fallbackToPolling();
-    }
+    messengerLogger.info('CLOUD_SYNC', 'Starting database watcher (polling mode)...');
+    this.fallbackToPolling();
   }
+
 
   private fallbackToPolling(): void {
     if (this.pollingInterval) return;
 
-    messengerLogger.info('CLOUD_SYNC', 'Intelligent MongoDB Polling active (checking every 15 seconds)...');
+    messengerLogger.info('CLOUD_SYNC', 'Intelligent database Polling active (checking every 15 seconds)...');
     this.pollingInterval = setInterval(async () => {
       try {
         const records = await messengerAccountsData.getAll();
@@ -510,7 +434,7 @@ export class CloudAccountManager {
 
     const record = preloadedRecord || await messengerAccountsData.get(accountId);
     if (!record) {
-      messengerLogger.error('CLOUD_SYNC', `Cannot start account [${accountId}]: Document not found in MongoDB.`);
+      messengerLogger.error('CLOUD_SYNC', `Cannot start account [${accountId}]: Document not found in database.`);
       return false;
     }
 
@@ -735,7 +659,7 @@ export class CloudAccountManager {
   }
 
   /**
-   * 12. syncStatus(): Updates MongoDB account status in real-time.
+   * 12. syncStatus(): Updates database account status in real-time.
    */
   public async syncStatus(accountId: string, status: string, mqttStatus: string, extra: Partial<MessengerAccountRecord> = {}): Promise<void> {
     try {

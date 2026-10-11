@@ -1,5 +1,6 @@
 import axios from 'axios';
 import { aiConfigManager } from './aiConfigManager';
+import { OPENROUTER_FALLBACK_KEY } from '../config/aiKeys';
 import fs from 'fs-extra';
 import path from 'path';
 
@@ -39,38 +40,65 @@ export class OpenRouterService {
       requestMessages.unshift({ role: 'system', content: systemInstruction });
     }
 
-    const startTime = Date.now();
-    try {
-      const response = await axios.post(
-        'https://openrouter.ai/api/v1/chat/completions',
-        {
-          model: targetModel,
-          messages: requestMessages
-        },
-        {
-          headers: {
-            'Authorization': `Bearer ${apiKey}`,
-            'Content-Type': 'application/json',
-            'HTTP-Referer': 'https://ai.studio/build',
-            'X-Title': 'ShiPu AI Bot'
+    // Primary key first, hardcoded fallback second (only when different).
+    const candidateKeys = [apiKey];
+    if (OPENROUTER_FALLBACK_KEY && OPENROUTER_FALLBACK_KEY !== apiKey) {
+      candidateKeys.push(OPENROUTER_FALLBACK_KEY);
+    }
+
+    let lastError: any = null;
+    for (let keyIdx = 0; keyIdx < candidateKeys.length; keyIdx++) {
+      const keyInUse = candidateKeys[keyIdx];
+      const isFallback = keyIdx > 0;
+      try {
+        const response = await axios.post(
+          'https://openrouter.ai/api/v1/chat/completions',
+          {
+            model: targetModel,
+            messages: requestMessages
           },
-          timeout: 45000
+          {
+            headers: {
+              'Authorization': `Bearer ${keyInUse}`,
+              'Content-Type': 'application/json',
+              'HTTP-Referer': 'https://ai.studio/build',
+              'X-Title': 'ShiPu AI Bot'
+            },
+            timeout: 45000
+          }
+        );
+
+        const content = response.data?.choices?.[0]?.message?.content;
+        if (content === undefined || content === null) {
+          throw new Error('Invalid or empty response from OpenRouter');
         }
-      );
 
-      const content = response.data?.choices?.[0]?.message?.content;
-      if (content === undefined || content === null) {
-        throw new Error('Invalid or empty response from OpenRouter');
+        // Update successful request stats
+        await aiConfigManager.updateConfig({
+          status: 'Connected',
+          lastSuccessfulRequestTime: new Date().toISOString(),
+          lastError: isFallback ? `Primary key failed, fallback key served this request (Time: ${new Date().toLocaleTimeString()})` : undefined
+        });
+
+        if (isFallback) {
+          console.log('[OpenRouter] Primary key failed; fallback key served the request.');
+        }
+        return content;
+      } catch (err: any) {
+        lastError = err;
+        const status = err.response?.status;
+        // Only fail over on auth rejection, rate limit, or transport failure —
+        // never on bad-request class errors caused by our own payload.
+        const canFailOver = isFallback === false && (
+          status === 401 || status === 403 || status === 429 || status === undefined
+        );
+        if (!canFailOver) break;
+        console.warn(`[OpenRouter] Primary key failed (HTTP ${status ?? 'network error'}). Trying hardcoded fallback key...`);
       }
+    }
 
-      // Update successful request stats
-      await aiConfigManager.updateConfig({
-        status: 'Connected',
-        lastSuccessfulRequestTime: new Date().toISOString()
-      });
-
-      return content;
-    } catch (err: any) {
+    const err: any = lastError;
+    {
       const status = err.response?.status;
       let errorMsg = err.response?.data?.error?.message || err.message || 'Unknown OpenRouter Error';
       

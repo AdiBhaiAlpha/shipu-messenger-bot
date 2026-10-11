@@ -1,13 +1,13 @@
 import { botEngine } from '../core/botEngine';
 import { FacebookSession } from '../adapters/messenger/FacebookSession';
-import { getMongoStatus } from '../db/mongodb';
+import { getDatabaseStatus } from '../db/firebaseDb';
 import { commandsData, threadsData, usersData, ftpConfigData } from '../db/database';
 
 export class SystemStatusService {
   public static async getSystemStatus(facebookSession: FacebookSession) {
     const stats = botEngine.getStats();
     const sessionMeta = facebookSession.getSafeMetadata();
-    const mongoStatus = getMongoStatus();
+    const mongoStatus = getDatabaseStatus();
     const ftpConfig = await ftpConfigData.get();
     const commands = await commandsData.getAll();
     const threads = await threadsData.getAll();

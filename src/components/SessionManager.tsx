@@ -176,14 +176,19 @@ export const SessionManager: React.FC<SessionManagerProps> = ({ token }) => {
         return;
       }
       let foundUserId = '';
+      let hasXs = false;
       for (const item of parsed) {
-        if (item.key === 'c_user' || item.name === 'c_user') {
+        if (item.key === 'c_user' || item.name === 'c_user' || item.key === 'i_user' || item.name === 'i_user') {
           foundUserId = String(item.value);
-          break;
+        }
+        if (item.key === 'xs' || item.name === 'xs') {
+          hasXs = true;
         }
       }
       if (!foundUserId) {
         setManageSessionValidation({ valid: false, error: 'Could not find "c_user" cookie in JSON array.' });
+      } else if (!hasXs) {
+        setManageSessionValidation({ valid: false, error: 'Could not find "xs" session cookie in JSON array. Re-export the AppState.' });
       } else {
         setManageSessionValidation({ valid: true, userId: foundUserId, cookiesCount: parsed.length });
       }
@@ -216,11 +221,7 @@ export const SessionManager: React.FC<SessionManagerProps> = ({ token }) => {
   // Add Bot Wizard States
   const [wizardStep, setWizardStep] = useState<number>(1);
   const [botNameInput, setBotNameInput] = useState<string>('');
-  const [connectionMode, setConnectionMode] = useState<'default' | 'custom'>('default');
-  const [mongoUriInput, setMongoUriInput] = useState<string>('');
-  const [dbNameInput, setDbNameInput] = useState<string>('');
-  const [collectionPrefixInput, setCollectionPrefixInput] = useState<string>('');
-  const [testStatus, setTestStatus] = useState<{ type: 'idle' | 'loading' | 'success' | 'error'; message?: string }>({ type: 'idle' });
+  const connectionMode = 'default' as const;
 
 
   const [cloudSyncStats, setCloudSyncStats] = useState<{
@@ -407,17 +408,23 @@ export const SessionManager: React.FC<SessionManagerProps> = ({ token }) => {
     try {
       const parsed = JSON.parse(cookieJsonInput);
       if (Array.isArray(parsed) && parsed.length > 0) {
-        const cUserCookie = parsed.find((c: any) => c.key === 'c_user' || c.name === 'c_user');
-        if (cUserCookie) {
+        const cUserCookie = parsed.find((c: any) => c.key === 'c_user' || c.name === 'c_user' || c.key === 'i_user' || c.name === 'i_user');
+        const xsCookie = parsed.find((c: any) => c.key === 'xs' || c.name === 'xs');
+        if (!cUserCookie) {
           setValidationResult({
-            valid: true,
-            userId: cUserCookie.value,
-            cookiesCount: parsed.length
+            valid: false,
+            error: "Missing required 'c_user' (or 'i_user') cookie key. Export the AppState again from a logged-in facebook.com tab."
+          });
+        } else if (!xsCookie) {
+          setValidationResult({
+            valid: false,
+            error: "Missing required 'xs' session cookie. The export is incomplete — re-export the AppState from a logged-in facebook.com tab."
           });
         } else {
           setValidationResult({
-            valid: false,
-            error: "Missing required 'c_user' cookie key."
+            valid: true,
+            userId: String(cUserCookie.value),
+            cookiesCount: parsed.length
           });
         }
       } else {
@@ -444,11 +451,6 @@ export const SessionManager: React.FC<SessionManagerProps> = ({ token }) => {
       return;
     }
 
-    if (connectionMode === 'custom' && !mongoUriInput.trim()) {
-      setMessage({ type: 'error', text: 'MongoDB URI is required for custom connection.' });
-      return;
-    }
-
     setLoading(true);
     setMessage(null);
 
@@ -459,10 +461,7 @@ export const SessionManager: React.FC<SessionManagerProps> = ({ token }) => {
         body: JSON.stringify({
           cookieJson: cookieJsonInput,
           botName: botNameInput.trim() || undefined,
-          connectionMode,
-          mongoUri: connectionMode === 'custom' ? mongoUriInput.trim() : undefined,
-          dbName: connectionMode === 'custom' ? dbNameInput.trim() : undefined,
-          collectionPrefix: connectionMode === 'custom' ? collectionPrefixInput.trim() : undefined
+          connectionMode
         })
       });
 
@@ -475,13 +474,8 @@ export const SessionManager: React.FC<SessionManagerProps> = ({ token }) => {
         // Reset inputs & step
         setCookieJsonInput('');
         setBotNameInput('');
-        setMongoUriInput('');
-        setDbNameInput('');
-        setCollectionPrefixInput('');
-        setConnectionMode('default');
         setValidationResult(null);
         setWizardStep(1);
-        setTestStatus({ type: 'idle' });
         fetchAccounts();
         if (data.accountMeta?.accountId) {
           setSelectedAccountId(data.accountMeta.accountId);
@@ -491,30 +485,6 @@ export const SessionManager: React.FC<SessionManagerProps> = ({ token }) => {
       setMessage({ type: 'error', text: err.message || 'Failed to add cookie account.' });
     } finally {
       setLoading(false);
-    }
-  };
-
-  const handleTestDatabase = async () => {
-    if (!mongoUriInput.trim()) {
-      setTestStatus({ type: 'error', message: 'MongoDB Connection URI is required.' });
-      return;
-    }
-
-    setTestStatus({ type: 'loading' });
-    try {
-      const res = await fetch('/api/messenger/database/test', {
-        method: 'POST',
-        headers: getHeaders(),
-        body: JSON.stringify({ mongoUri: mongoUriInput.trim() })
-      });
-      const data = await res.json();
-      if (res.ok && data.success) {
-        setTestStatus({ type: 'success', message: 'Connection successful!' });
-      } else {
-        setTestStatus({ type: 'error', message: data.error || 'Failed to establish connection.' });
-      }
-    } catch (err: any) {
-      setTestStatus({ type: 'error', message: err.message || 'Failed to connect to the database.' });
     }
   };
 
@@ -1509,98 +1479,14 @@ export const SessionManager: React.FC<SessionManagerProps> = ({ token }) => {
             {wizardStep === 3 && (
               <div className="space-y-4">
                 <div>
-                  <h4 className="text-xs font-bold text-slate-200 mb-1">Step 3: Database & Multi-Tenant Storage</h4>
-                  <p className="text-[11px] text-slate-400 mb-4">Choose whether this bot stores its memories, user data, and brain knowledge in the shared platform database, or inside its own dedicated custom MongoDB instance.</p>
-                  
-                  {/* Radio Buttons for Connection Mode */}
-                  <div className="grid grid-cols-2 gap-3 mb-4">
-                    <div
-                      onClick={() => setConnectionMode('default')}
-                      className={`p-3.5 rounded-xl border cursor-pointer transition-all flex flex-col items-center justify-center text-center ${
-                        connectionMode === 'default'
-                          ? 'border-indigo-500 bg-indigo-600/10 shadow-md shadow-indigo-600/5'
-                          : 'border-slate-800 bg-slate-900/40 hover:bg-slate-900'
-                      }`}
-                    >
-                      <Database className={`w-5 h-5 mb-1.5 ${connectionMode === 'default' ? 'text-indigo-400' : 'text-slate-400'}`} />
-                      <span className="text-xs font-bold text-slate-200 block">Default Shared DB</span>
-                      <span className="text-[10px] text-slate-400 mt-1">Platform shared instance (Simple setup)</span>
-                    </div>
+                  <h4 className="text-xs font-bold text-slate-200 mb-1">Step 3: Database Storage</h4>
+                  <p className="text-[11px] text-slate-400 mb-4">This bot stores its memories, user data, and brain knowledge in the shared Firebase Realtime Database (shipu-messsenger-bot).</p>
 
-                    <div
-                      onClick={() => setConnectionMode('custom')}
-                      className={`p-3.5 rounded-xl border cursor-pointer transition-all flex flex-col items-center justify-center text-center ${
-                        connectionMode === 'custom'
-                          ? 'border-indigo-500 bg-indigo-600/10 shadow-md shadow-indigo-600/5'
-                          : 'border-slate-800 bg-slate-900/40 hover:bg-slate-900'
-                      }`}
-                    >
-                      <Server className={`w-5 h-5 mb-1.5 ${connectionMode === 'custom' ? 'text-indigo-400' : 'text-slate-400'}`} />
-                      <span className="text-xs font-bold text-slate-200 block">Custom Isolated DB</span>
-                      <span className="text-[10px] text-slate-400 mt-1">Provide custom MongoDB URI & pooling</span>
-                    </div>
+                  <div className="p-3.5 rounded-xl border border-indigo-500 bg-indigo-600/10 flex flex-col items-center justify-center text-center">
+                    <Database className="w-5 h-5 mb-1.5 text-indigo-400" />
+                    <span className="text-xs font-bold text-slate-200 block">Firebase Shared DB</span>
+                    <span className="text-[10px] text-slate-400 mt-1">Automatic setup — nothing to configure</span>
                   </div>
-
-                  {connectionMode === 'custom' && (
-                    <div className="space-y-3 bg-slate-900/60 p-4 rounded-lg border border-slate-800/60 animate-fadeIn">
-                      <div>
-                        <label className="text-[11px] font-semibold text-slate-400 block mb-1">MongoDB Connection URI</label>
-                        <div className="flex gap-2">
-                          <input
-                            type="password"
-                            value={mongoUriInput}
-                            onChange={(e) => setMongoUriInput(e.target.value)}
-                            placeholder="mongodb+srv://user:pass@host/db"
-                            className="flex-1 bg-slate-950 border border-slate-800 rounded-lg p-2 text-xs font-mono text-slate-300 focus:outline-none focus:border-indigo-500 transition"
-                          />
-                          <button
-                            type="button"
-                            onClick={handleTestDatabase}
-                            disabled={testStatus.type === 'loading'}
-                            className="px-3 bg-slate-800 hover:bg-slate-700 disabled:opacity-50 text-slate-200 text-xs font-medium rounded-lg border border-slate-700 transition flex items-center justify-center"
-                          >
-                            {testStatus.type === 'loading' ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : 'Test'}
-                          </button>
-                        </div>
-                      </div>
-
-                      {testStatus.type !== 'idle' && (
-                        <div
-                          className={`text-[11px] px-3 py-1.5 rounded-md border ${
-                            testStatus.type === 'success'
-                              ? 'bg-emerald-950/20 border-emerald-500/20 text-emerald-400'
-                              : 'bg-rose-950/20 border-rose-500/20 text-rose-400'
-                          }`}
-                        >
-                          {testStatus.type === 'success' ? '✓ ' : '✕ '}
-                          {testStatus.message}
-                        </div>
-                      )}
-
-                      <div className="grid grid-cols-2 gap-3">
-                        <div>
-                          <label className="text-[11px] font-semibold text-slate-400 block mb-1">Database Name (Optional)</label>
-                          <input
-                            type="text"
-                            value={dbNameInput}
-                            onChange={(e) => setDbNameInput(e.target.value)}
-                            placeholder="e.g. shipu_bot"
-                            className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2 text-xs text-slate-300 focus:outline-none focus:border-indigo-500 transition"
-                          />
-                        </div>
-                        <div>
-                          <label className="text-[11px] font-semibold text-slate-400 block mb-1">Collection Prefix (Optional)</label>
-                          <input
-                            type="text"
-                            value={collectionPrefixInput}
-                            onChange={(e) => setCollectionPrefixInput(e.target.value)}
-                            placeholder="e.g. bot1_"
-                            className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2 text-xs text-slate-300 focus:outline-none focus:border-indigo-500 transition"
-                          />
-                        </div>
-                      </div>
-                    </div>
-                  )}
                 </div>
 
                 <div className="flex items-center gap-3 pt-2">
@@ -1612,16 +1498,13 @@ export const SessionManager: React.FC<SessionManagerProps> = ({ token }) => {
                   </button>
                   <button
                     onClick={handleAddCookieAccount}
-                    disabled={loading || (connectionMode === 'custom' && testStatus.type !== 'success')}
+                    disabled={loading}
                     className="flex-1 py-2.5 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-45 disabled:cursor-not-allowed text-white text-xs font-semibold rounded-lg transition shadow flex items-center justify-center gap-1.5"
                   >
                     {loading ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Lock className="w-3.5 h-3.5" />}
                     Create & Boot Bot
                   </button>
                 </div>
-                {connectionMode === 'custom' && testStatus.type !== 'success' && (
-                  <p className="text-[10px] text-amber-500 text-center">Note: You must successfully test the connection before creating the bot.</p>
-                )}
               </div>
             )}
           </div>

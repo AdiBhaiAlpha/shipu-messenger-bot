@@ -9,7 +9,7 @@ import { aiosService } from '../services/aiosService';
 import { contextEngine } from '../services/contextEngine';
 import { toolDiscoveryEngine } from '../services/toolDiscoveryEngine';
 import { isBotMessageId } from '../utils/commandParser';
-import { AIOSMemoryModel, AIOSSessionModel, AIOSUsageModel, UserModel } from '../db/mongodb';
+import { AIOSMemoryModel, AIOSSessionModel, AIOSUsageModel, UserModel } from '../db/firebaseDb';
 import { Type } from '@google/genai';
 import { brainService } from '../services/brainService';
 import axios from 'axios';
@@ -327,7 +327,7 @@ async function processShipuAiResponse(senderID: string, threadID: string, rawTex
     // Check if AI extracted an inferred attribute (relationship, nickname, communication_style)
     if (resObj.extractedAttribute && resObj.extractedAttribute.type && resObj.extractedAttribute.value) {
       try {
-        const { InferredAttributeModel } = await import('../db/mongodb');
+        const { InferredAttributeModel } = await import('../db/firebaseDb');
         const attrType = resObj.extractedAttribute.type.toLowerCase().trim();
         const attrVal = resObj.extractedAttribute.value.trim();
         
@@ -349,7 +349,7 @@ async function processShipuAiResponse(senderID: string, threadID: string, rawTex
             }
             await attr.save();
           } else {
-            attr = new InferredAttributeModel({
+            attr = await InferredAttributeModel.create({
               threadID,
               userID: senderID,
               userName: '',
