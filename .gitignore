@@ -38,7 +38,7 @@ backup_appstate_cookie.json
 # Runtime-Generated Secrets & Local State (NEVER COMMIT)
 # config/encryption.key decrypts every stored Facebook appstate + password.
 config/encryption.key
-config/
+/config/
 # storage/ holds encrypted Supabase / provider credentials.
 storage/
 # data/ holds local fallback DB snapshots (incl. admin password hashes).
