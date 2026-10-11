@@ -43,3 +43,4 @@ config/
 storage/
 # data/ holds local fallback DB snapshots (incl. admin password hashes).
 data/
+.vercel
