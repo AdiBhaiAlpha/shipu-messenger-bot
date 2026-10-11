@@ -1,7 +1,7 @@
-// Vercel serverless entry: serves the prebuilt Express app (dist/server.cjs,
-// produced by `npm run build`). Plain CommonJS on purpose — Vercel's bundler
-// cannot resolve the extensionless TS imports used across src/.
-const { app, startServer } = require('../dist/server.cjs');
+// Vercel serverless entry (ESM): serves the prebuilt Express app
+// (dist/server.cjs, produced by `npm run build`).
+const bundled = await import('../dist/server.cjs');
+const { app, startServer } = bundled.default ?? bundled;
 
 let boot = null;
 
@@ -17,7 +17,7 @@ function ensureBooted() {
   return boot;
 }
 
-module.exports = async function handler(req, res) {
+export default async function handler(req, res) {
   try {
     await ensureBooted();
   } catch (err) {
@@ -25,4 +25,4 @@ module.exports = async function handler(req, res) {
     return;
   }
   app(req, res);
-};
+}
