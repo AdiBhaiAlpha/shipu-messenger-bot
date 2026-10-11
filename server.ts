@@ -5177,8 +5177,11 @@ app.delete('/api/telegram/logs', requireAdminAuth, (req: Request, res: Response)
 let isServerStarted = false;
 let runningHttpServer: any = null;
 
-async function startServer() {
+async function startServer(opts: { http?: boolean } = {}) {
   if (isServerStarted && runningHttpServer) {
+    return runningHttpServer;
+  }
+  if (isServerStarted && opts.http === false) {
     return runningHttpServer;
   }
   isServerStarted = true;
@@ -5222,6 +5225,10 @@ async function startServer() {
   });
 
   try {
+    if (opts.http === false) {
+      console.log('[SERVER] Vercel serverless mode: skipping HTTP listen, Express app serves via function handler.');
+      return runningHttpServer;
+    }
     runningHttpServer = app.listen(PORT, '0.0.0.0', () => {
       console.log(`ShiPu Ai🤖 Engine & Control Panel running at http://0.0.0.0:${PORT}`);
       heartbeatService.start(PORT);
@@ -5273,8 +5280,12 @@ process.on('exit', (code) => {
   console.log(`[DIAGNOSTICS] Process exit event received with code: ${code}`);
 });
 
-startServer().catch((err: any) => {
-  console.error('[BOOTSTRAP] Failed to start server:', err);
-});
+// On Vercel the serverless function (api/index.ts) boots the engine lazily;
+// auto-start here only for long-running hosts (local / Render / VPS).
+if (!process.env.VERCEL) {
+  startServer().catch((err: any) => {
+    console.error('[BOOTSTRAP] Failed to start server:', err);
+  });
+}
 
 export { startServer, app };
