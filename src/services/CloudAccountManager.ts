@@ -33,6 +33,8 @@ export class CloudAccountManager {
 
   // In-memory cache of account document checksums to detect remote updates
   private knownAccountState = new Map<string, { updatedAt: number; encryptedState: string; enabled: boolean }>();
+  // Consecutive snapshot misses per account before a removal is honored.
+  private removalMissCounts = new Map<string, number>();
 
   private constructor() {}
 
@@ -393,12 +395,28 @@ export class CloudAccountManager {
           }
         }
 
-        // Check for removed account documents
-        for (const cachedAccountId of Array.from(this.knownAccountState.keys())) {
-          if (!currentAccountIds.has(cachedAccountId)) {
-            messengerLogger.info('CLOUD_SYNC', `Cloud Sync detected removal of account [${cachedAccountId}]`);
-            this.knownAccountState.delete(cachedAccountId);
-            await this.removeAccount(cachedAccountId);
+        // Check for removed account documents.
+        // SAFETY: never treat an empty snapshot as mass deletion — a transient
+        // read failure returns [] and must not wipe durable sessions. Require
+        // a non-empty snapshot AND 3 consecutive misses per account.
+        if (records.length === 0) {
+          messengerLogger.warn('CLOUD_SYNC', 'Polling snapshot empty; skipping removal pass (transient read protection).');
+        } else {
+          for (const cachedAccountId of Array.from(this.knownAccountState.keys())) {
+            if (!currentAccountIds.has(cachedAccountId)) {
+              const misses = (this.removalMissCounts.get(cachedAccountId) || 0) + 1;
+              this.removalMissCounts.set(cachedAccountId, misses);
+              if (misses < 3) {
+                messengerLogger.warn('CLOUD_SYNC', `Account [${cachedAccountId}] missing from snapshot (${misses}/3). Awaiting confirmation before removal.`);
+                continue;
+              }
+              this.removalMissCounts.delete(cachedAccountId);
+              messengerLogger.info('CLOUD_SYNC', `Cloud Sync detected removal of account [${cachedAccountId}] (confirmed 3x)`);
+              this.knownAccountState.delete(cachedAccountId);
+              await this.removeAccount(cachedAccountId);
+            } else {
+              this.removalMissCounts.delete(cachedAccountId);
+            }
           }
         }
 
