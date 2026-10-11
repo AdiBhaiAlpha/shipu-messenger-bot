@@ -61,9 +61,11 @@ export class ClientSiteStorage {
   }
 
   private async ensureDirs() {
-    await fs.ensureDir(USERS_DIR);
-    await fs.ensureDir(PAYMENTS_DIR);
-    await fs.ensureDir(SETTINGS_DIR);
+    // Vercel serverless filesystem is read-only except /tmp — never crash boot.
+    try {
+      await fs.ensureDir(USERS_DIR);
+      await fs.ensureDir(PAYMENTS_DIR);
+      await fs.ensureDir(SETTINGS_DIR);
 
     const settingsPath = path.join(SETTINGS_DIR, 'settings.json');
     if (!await fs.pathExists(settingsPath)) {
@@ -101,6 +103,9 @@ export class ClientSiteStorage {
         createdAt: new Date().toISOString()
       };
       await this.saveUser(sampleUser);
+      }
+    } catch (err: any) {
+      console.warn(`[ClientSiteStorage] Local directory setup skipped (read-only fs?): ${err?.message || err}`);
     }
   }
 
