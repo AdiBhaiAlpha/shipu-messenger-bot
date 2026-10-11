@@ -357,8 +357,7 @@ async function initializeDatabaseAndServices() {
     } catch (fbErr: any) {
       console.warn('[FirebaseRTDB] Startup restore skipped:', fbErr?.message || fbErr);
     }
-    await multiAccountManager.initializeAllAccountsFromDB();
-    await personalAIManager.initializeAllAccountsFromDB();
+    await bootCoreServices();
     try {
       await clientBotsManager.init();
     } catch (err) {
@@ -394,7 +393,44 @@ async function initializeDatabaseAndServices() {
   } else {
     console.error('[Firebase] Connection failed after 5 attempts:', res.error);
     sharedAccessMonitor.start();
+    // Keep retrying in the background: on slow cold starts (first boot) the
+    // database may come up seconds later. Managers boot exactly once.
+    let bgAttempts = 0;
+    const bgTimer = setInterval(async () => {
+      bgAttempts++;
+      try {
+        const retry = await connectDatabase();
+        if (retry.connected) {
+          clearInterval(bgTimer);
+          console.log(`[STARTUP] Firebase reachable on background attempt #${bgAttempts}. Booting services...`);
+          await bootCoreServices();
+        } else if (bgAttempts % 20 === 0) {
+          console.warn(`[STARTUP] Firebase still unreachable after ${bgAttempts} background attempts: ${retry.error}`);
+        }
+      } catch (err: any) {
+        console.warn('[STARTUP] Background boot attempt failed:', err?.message || err);
+      }
+    }, 15000);
+    if (typeof (bgTimer as any)?.unref === 'function') (bgTimer as any).unref();
   }
+}
+
+let coreServicesBooted = false;
+async function bootCoreServices(): Promise<void> {
+  if (coreServicesBooted) return;
+  coreServicesBooted = true;
+  // Durable session restore first (best-effort, never throws).
+  try {
+    const { firebaseRtdbService } = await import('./src/services/firebaseRtdbService');
+    const restored = await firebaseRtdbService.restoreSessionsToMongo();
+    if (restored.error) {
+      console.warn('[FirebaseRTDB] Startup restore skipped:', restored.error);
+    }
+  } catch (fbErr: any) {
+    console.warn('[FirebaseRTDB] Startup restore skipped:', fbErr?.message || fbErr);
+  }
+  await multiAccountManager.initializeAllAccountsFromDB();
+  await personalAIManager.initializeAllAccountsFromDB();
 }
 
 initializeDatabaseAndServices();
