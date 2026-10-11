@@ -17,7 +17,7 @@ export interface ProviderMetrics {
 export class AIProviderManager {
   private static instance: AIProviderManager;
   private providers: Map<string, AIProvider> = new Map();
-  private activeProviderId = 'google_studio';
+  private activeProviderId = 'openrouter';
 
   // Circuit Breaker & Metrics State
   private circuitBreakers = new Map<string, { consecutiveFailures: number; trippedUntil: number }>();

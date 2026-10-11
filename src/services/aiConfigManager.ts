@@ -1,11 +1,16 @@
 import { BotSettingModel } from '../db/firebaseDb';
 import { encryptPassword, decryptPassword } from '../utils/crypto';
+import { OPENROUTER_FALLBACK_ORDER } from '../config/aiModels';
 import axios from 'axios';
 
 export interface AIConfiguration {
   openRouterApiKey: string; // decrypted at runtime, stored encrypted
   defaultProvider: string;  // 'openrouter' or 'google_studio'
   defaultModel: string;     // default model name, e.g., 'google/gemma-2-9b-it:free'
+  /** Last model that successfully generated a response. Used first until it errors. */
+  lastWorkingModel?: string;
+  /** Ordered OpenRouter fallback chain (defaults to the hardcoded catalog order). */
+  modelFallbackOrder?: string[];
   aiEnabled: boolean;
   status: 'Connected' | 'Invalid' | 'Rate Limited' | 'Offline';
   lastSuccessfulRequestTime?: string;
@@ -41,6 +46,8 @@ export class AIConfigManager {
       openRouterApiKey: process.env.OPENROUTER_API_KEY || '',
       defaultProvider: 'openrouter',
       defaultModel: 'google/gemma-2-9b-it:free',
+      lastWorkingModel: '',
+      modelFallbackOrder: [...OPENROUTER_FALLBACK_ORDER],
       aiEnabled: true,
       status: 'Offline',
       keyHistory: []
@@ -70,6 +77,8 @@ export class AIConfigManager {
       openRouterApiKey: process.env.OPENROUTER_API_KEY || '',
       defaultProvider: 'openrouter',
       defaultModel: 'google/gemma-2-9b-it:free',
+      lastWorkingModel: '',
+      modelFallbackOrder: [...OPENROUTER_FALLBACK_ORDER],
       aiEnabled: true,
       status: 'Offline',
       keyHistory: []

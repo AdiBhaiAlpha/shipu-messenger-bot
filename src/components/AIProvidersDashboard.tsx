@@ -17,6 +17,7 @@ import {
   AlertCircle
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
+import { OPENROUTER_FREE_MODELS } from '../config/aiModels';
 
 interface AIProvidersDashboardProps {
   token: string;
@@ -26,6 +27,7 @@ export interface AIConfigurationState {
   openRouterApiKey: string;
   defaultProvider: string;
   defaultModel: string;
+  lastWorkingModel?: string;
   aiEnabled: boolean;
   status: 'Connected' | 'Invalid' | 'Rate Limited' | 'Offline';
   lastSuccessfulRequestTime?: string;
@@ -36,17 +38,10 @@ export interface AIConfigurationState {
   }>;
 }
 
-const POPULAR_MODELS = [
-  { value: 'google/gemma-2-9b-it:free', label: 'Gemma 2 9B (Free)' },
-  { value: 'google/gemma-4-26b-a4b-it:free', label: 'Gemma 4 26B (Free)' },
-  { value: 'openai/gpt-oss-20b:free', label: 'GPT OSS 20B (Free)' },
-  { value: 'cohere/north-mini-code:free', label: 'Cohere North Mini Code (Free)' },
-  { value: 'meta-llama/llama-3-8b-instruct:free', label: 'Llama 3 8B Instruct (Free)' },
-  { value: 'mistralai/mistral-7b-instruct:free', label: 'Mistral 7B Instruct (Free)' },
-  { value: 'google/gemini-2.5-flash', label: 'Gemini 2.5 Flash' },
-  { value: 'google/gemini-2.5-pro', label: 'Gemini 2.5 Pro' },
-  { value: 'openai/gpt-4o-mini', label: 'GPT-4o Mini' }
-];
+const POPULAR_MODELS = OPENROUTER_FREE_MODELS.map(m => ({
+  value: m.value,
+  label: `${m.label}${m.context ? ` (${m.context})` : ''}`
+}));
 
 export const AIProvidersDashboard: React.FC<AIProvidersDashboardProps> = ({ token }) => {
   const [config, setConfig] = useState<AIConfigurationState | null>(null);
@@ -91,7 +86,13 @@ export const AIProvidersDashboard: React.FC<AIProvidersDashboardProps> = ({ toke
         },
         body: JSON.stringify({ apiKey: newApiKey })
       });
-      const data = await res.json();
+      const text = await res.text();
+      let data: any;
+      try {
+        data = JSON.parse(text);
+      } catch {
+        data = { success: false, status: 'Offline', error: `Server returned a non-JSON response (HTTP ${res.status}). The backend host may be asleep or unreachable — try the Render URL instead of Vercel.` };
+      }
       setTestResult(data);
       if (data.success) {
         setFeedback({ type: 'success', message: 'API connection tested successfully!' });
@@ -458,9 +459,18 @@ export const AIProvidersDashboard: React.FC<AIProvidersDashboardProps> = ({ toke
                   High quality speech synthesis model (Fish Audio). Converts text to high fidelity voice/audio clips, handling long sentences and Bengali/English naturally.
                 </p>
               </div>
+                </div>
+                {config.lastWorkingModel ? (
+                  <p className="text-[11px] text-emerald-400 mt-2">
+                    ✓ Last working model (auto-used first): <code className="font-mono">{config.lastWorkingModel}</code>
+                  </p>
+                ) : (
+                  <p className="text-[11px] text-slate-500 mt-2">
+                    No successful generation yet — the fallback chain tries all {POPULAR_MODELS.length} free models in order.
+                  </p>
+                )}
+              </div>
             </div>
-          </div>
-        </div>
 
         {/* Right column: Status logs, History & Rollbacks */}
         <div className="space-y-6">

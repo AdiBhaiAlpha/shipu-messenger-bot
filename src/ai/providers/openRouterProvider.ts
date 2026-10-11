@@ -13,7 +13,7 @@ export class OpenRouterAIProvider implements AIProvider {
     }
 
     const startTime = Date.now();
-    const model = config.defaultModel || 'google/gemma-2-9b-it:free';
+    const requestedModel = config.defaultModel || 'google/gemma-2-9b-it:free';
 
     try {
       // Reformat standard contents parts to simpler messages array for OpenRouter
@@ -25,14 +25,15 @@ export class OpenRouterAIProvider implements AIProvider {
 
       const responseText = await openRouterService.generateChatCompletion(
         messages,
-        model,
+        requestedModel,
         options?.systemInstruction
       );
 
       const latencyMs = Date.now() - startTime;
+      const servedModel = openRouterService.lastUsedModel || requestedModel;
       return {
         text: responseText,
-        model,
+        model: servedModel,
         latencyMs,
         retries: 0,
         success: true
@@ -41,7 +42,7 @@ export class OpenRouterAIProvider implements AIProvider {
       const latencyMs = Date.now() - startTime;
       return {
         text: '',
-        model,
+        model: requestedModel,
         latencyMs,
         retries: 0,
         success: false,

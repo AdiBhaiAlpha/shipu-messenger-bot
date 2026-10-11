@@ -1,11 +1,20 @@
 import axios from 'axios';
 import { aiConfigManager } from './aiConfigManager';
 import { OPENROUTER_FALLBACK_KEY } from '../config/aiKeys';
+import { OPENROUTER_FALLBACK_ORDER } from '../config/aiModels';
 import fs from 'fs-extra';
 import path from 'path';
 
 export class OpenRouterService {
   private static instance: OpenRouterService;
+
+  // Per-model circuit breaker: skip models failing repeatedly (reset on success/cooldown).
+  private modelFailures = new Map<string, { count: number; lastFail: number }>();
+  private static readonly MODEL_FAIL_LIMIT = 3;
+  private static readonly MODEL_FAIL_WINDOW_MS = 10 * 60 * 1000;
+
+  /** The model that served the most recent successful response (sticky default). */
+  public lastUsedModel = '';
 
   private constructor() {}
 
@@ -14,6 +23,47 @@ export class OpenRouterService {
       OpenRouterService.instance = new OpenRouterService();
     }
     return OpenRouterService.instance;
+  }
+
+  private isModelBlocked(model: string): boolean {
+    const rec = this.modelFailures.get(model);
+    if (!rec) return false;
+    if (Date.now() - rec.lastFail > OpenRouterService.MODEL_FAIL_WINDOW_MS) {
+      this.modelFailures.delete(model);
+      return false;
+    }
+    return rec.count >= OpenRouterService.MODEL_FAIL_LIMIT;
+  }
+
+  private recordModelFailure(model: string): void {
+    const rec = this.modelFailures.get(model) || { count: 0, lastFail: 0 };
+    rec.count++;
+    rec.lastFail = Date.now();
+    this.modelFailures.set(model, rec);
+  }
+
+  private recordModelSuccess(model: string): void {
+    this.modelFailures.delete(model);
+  }
+
+  /**
+   * Ordered model chain for one request:
+   * explicit model param first, then sticky lastWorkingModel, then the
+   * configured fallback order (skipping circuit-broken models).
+   */
+  public buildModelChain(config: any, explicitModel?: string): string[] {
+    const chain: string[] = [];
+    const push = (m?: string) => {
+      if (m && typeof m === 'string' && !chain.includes(m)) chain.push(m);
+    };
+    push(explicitModel);
+    push(config.lastWorkingModel);
+    push(config.defaultModel);
+    const order = (config.modelFallbackOrder && config.modelFallbackOrder.length > 0)
+      ? config.modelFallbackOrder
+      : OPENROUTER_FALLBACK_ORDER;
+    for (const m of order) push(m);
+    return chain.filter(m => !this.isModelBlocked(m));
   }
 
   /**
@@ -34,7 +84,6 @@ export class OpenRouterService {
       throw new Error('OpenRouter API key is not configured. Please set it in the Admin Dashboard.');
     }
 
-    const targetModel = model || config.defaultModel || 'google/gemma-2-9b-it:free';
     const requestMessages = [...messages];
     if (systemInstruction) {
       requestMessages.unshift({ role: 'system', content: systemInstruction });
@@ -46,62 +95,88 @@ export class OpenRouterService {
       candidateKeys.push(OPENROUTER_FALLBACK_KEY);
     }
 
-    let lastError: any = null;
-    for (let keyIdx = 0; keyIdx < candidateKeys.length; keyIdx++) {
-      const keyInUse = candidateKeys[keyIdx];
-      const isFallback = keyIdx > 0;
-      try {
-        const response = await axios.post(
-          'https://openrouter.ai/api/v1/chat/completions',
-          {
-            model: targetModel,
-            messages: requestMessages
-          },
-          {
-            headers: {
-              'Authorization': `Bearer ${keyInUse}`,
-              'Content-Type': 'application/json',
-              'HTTP-Referer': 'https://ai.studio/build',
-              'X-Title': 'ShiPu AI Bot'
-            },
-            timeout: 45000
-          }
-        );
-
-        const content = response.data?.choices?.[0]?.message?.content;
-        if (content === undefined || content === null) {
-          throw new Error('Invalid or empty response from OpenRouter');
-        }
-
-        // Update successful request stats
-        await aiConfigManager.updateConfig({
-          status: 'Connected',
-          lastSuccessfulRequestTime: new Date().toISOString(),
-          lastError: isFallback ? `Primary key failed, fallback key served this request (Time: ${new Date().toLocaleTimeString()})` : undefined
-        });
-
-        if (isFallback) {
-          console.log('[OpenRouter] Primary key failed; fallback key served the request.');
-        }
-        return content;
-      } catch (err: any) {
-        lastError = err;
-        const status = err.response?.status;
-        // Only fail over on auth rejection, rate limit, or transport failure —
-        // never on bad-request class errors caused by our own payload.
-        const canFailOver = isFallback === false && (
-          status === 401 || status === 403 || status === 429 || status === undefined
-        );
-        if (!canFailOver) break;
-        console.warn(`[OpenRouter] Primary key failed (HTTP ${status ?? 'network error'}). Trying hardcoded fallback key...`);
-      }
+    const modelChain = this.buildModelChain(config, model);
+    if (modelChain.length === 0) {
+      throw new Error('[OpenRouter API Error]: All models are circuit-broken after repeated failures. Try again later.');
     }
 
-    const err: any = lastError;
+    let lastError: any = null;
+    let lastStatus: number | undefined;
+    let keysDead = false;
+    modelLoop:
+    for (const targetModel of modelChain) {
+      for (let keyIdx = 0; keyIdx < candidateKeys.length; keyIdx++) {
+        const keyInUse = candidateKeys[keyIdx];
+        const isFallbackKey = keyIdx > 0;
+        try {
+          const response = await axios.post(
+            'https://openrouter.ai/api/v1/chat/completions',
+            {
+              model: targetModel,
+              messages: requestMessages
+            },
+            {
+              headers: {
+                'Authorization': `Bearer ${keyInUse}`,
+                'Content-Type': 'application/json',
+                'HTTP-Referer': 'https://ai.studio/build',
+                'X-Title': 'ShiPu AI Bot'
+              },
+              timeout: 45000
+            }
+          );
+
+          const content = response.data?.choices?.[0]?.message?.content;
+          if (content === undefined || content === null) {
+            throw new Error('Invalid or empty response from OpenRouter');
+          }
+
+          // SUCCESS: remember this model as the sticky default until it errors.
+          this.lastUsedModel = targetModel;
+          this.recordModelSuccess(targetModel);
+          const updates: any = {
+            status: 'Connected',
+            lastSuccessfulRequestTime: new Date().toISOString()
+          };
+          if (targetModel !== config.lastWorkingModel) {
+            updates.lastWorkingModel = targetModel;
+          }
+          if (isFallbackKey || targetModel !== (model || config.defaultModel)) {
+            updates.lastError = `Served by ${targetModel}${isFallbackKey ? ' (fallback key)' : ''} at ${new Date().toLocaleTimeString()}`;
+          }
+          await aiConfigManager.updateConfig(updates);
+
+          if (isFallbackKey || targetModel !== (model || config.defaultModel)) {
+            console.log(`[OpenRouter] Served by fallback model ${targetModel}${isFallbackKey ? ' (fallback key)' : ''}.`);
+          }
+          return content;
+        } catch (err: any) {
+          lastError = err;
+          lastStatus = err.response?.status;
+          const msgText = String(err.response?.data?.error?.message || err.message || '').toLowerCase();
+          // Account-level death ("User not found") kills every model+key the
+          // same way — abort the whole chain instead of burning 16 models.
+          if (msgText.includes('user not found')) {
+            keysDead = true;
+            console.error('[OpenRouter] API keys rejected (account gone). Aborting model chain.');
+            break modelLoop;
+          }
+          // Fail over across keys AND models on auth rejection, rate limit,
+          // missing-model (404), or transport failure — never on 400 payloads.
+          const retryable = lastStatus === 401 || lastStatus === 403 || lastStatus === 429 || lastStatus === 404 || lastStatus === undefined;
+          if (!retryable) break;
+          console.warn(`[OpenRouter] ${targetModel} failed (HTTP ${lastStatus ?? 'network error'}). Trying next...`);
+        }
+      }
+      // Model exhausted on all keys -> circuit-break it and move to next model.
+      this.recordModelFailure(targetModel);
+    }
+
+    const err: any = lastError || new Error('All OpenRouter models failed');
     {
-      const status = err.response?.status;
+      const status = lastStatus ?? err.response?.status;
       let errorMsg = err.response?.data?.error?.message || err.message || 'Unknown OpenRouter Error';
-      
+
       let newStatus: typeof config.status = 'Offline';
       if (status === 401 || status === 403) {
         newStatus = 'Invalid';
