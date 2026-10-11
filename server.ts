@@ -254,6 +254,32 @@ app.get('/api/debug/accounts', (req: Request, res: Response) => {
   res.json(multiIds);
 });
 
+// TEMPORARY boot diagnostics (remove after Render investigation).
+app.get('/api/debug/bootinfo', async (req: Request, res: Response) => {
+  try {
+    const { isDatabaseConnected, getDatabaseStatus } = await import('./src/db/firebaseDb');
+    const { messengerAccountsData } = await import('./src/db/database');
+    const { firebaseRtdbService } = await import('./src/services/firebaseRtdbService');
+    let dbCount: any = 'n/a';
+    let dbError: any = null;
+    try {
+      const all = await messengerAccountsData.getAll();
+      dbCount = all.length;
+    } catch (e: any) { dbError = e?.message || String(e); }
+    const remote = await firebaseRtdbService.getSessions();
+    res.json({
+      dbConnected: isDatabaseConnected(),
+      dbStatus: getDatabaseStatus(),
+      dbAccountsCount: dbCount,
+      dbError,
+      firebaseSessions: remote.success ? Object.keys(remote.sessions || {}) : `ERR:${remote.error}`,
+      memAccounts: multiAccountManager.getAllAccountsMeta().map(m => ({ id: m.accountId, status: m.status, mqtt: m.mqttStatus }))
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: err?.message || String(err) });
+  }
+});
+
 app.get('/api/debug/fca-methods/:accountId', (req: Request, res: Response) => {
   const { accountId } = req.params;
   const resolved = resolveAnyAccountConnection(accountId);
