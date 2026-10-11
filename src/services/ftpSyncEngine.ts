@@ -55,9 +55,14 @@ export class FtpSyncEngine {
   }
 
   private ensureDirs() {
-    fs.ensureDirSync(path.join(process.cwd(), 'backups'));
-    for (const folder of this.watchedPaths) {
-      fs.ensureDirSync(path.join(process.cwd(), folder));
+    // Vercel serverless filesystem is read-only except /tmp — never crash boot.
+    try {
+      fs.ensureDirSync(path.join(process.cwd(), 'backups'));
+      for (const folder of this.watchedPaths) {
+        fs.ensureDirSync(path.join(process.cwd(), folder));
+      }
+    } catch (err: any) {
+      console.warn(`[FtpSyncEngine] Local directory setup skipped (read-only fs?): ${err?.message || err}`);
     }
   }
 
