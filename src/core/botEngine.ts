@@ -28,6 +28,7 @@ import { smartConversationBrain } from './smartConversationBrain';
 import { aiAutoReplyEngine } from '../services/aiAutoReplyEngine';
 import { behaviourObserver } from '../services/behaviourObserver';
 import { selfLearning } from '../services/selfLearning';
+import { emotionEngine } from '../services/emotionEngine';
 import { brainService } from '../services/brainService';
 import { aiosService } from '../services/aiosService';
 import { BrainMemoryModel, BrainSuggestionModel } from '../db/firebaseDb';
@@ -881,13 +882,15 @@ class ShiPuBotEngine {
           await aiAutoReplyEngine.recordMessage(threadID, senderID);
 
           if (decision.reply) {
+            const enrich = await emotionEngine.onMessageEnrich(senderID, threadID, rawText, isDM);
             const systemKnowledge = brainService.findMatch(rawText)?.memory
               ? `\n\n=== INTERNAL KNOWLEDGE (use silently) ===\n${brainService.findMatch(rawText)!.memory.reply}`
               : '';
+            const styleHint = enrich.styleHint ? `\n${enrich.styleHint}` : '';
             const replyText = await openRouterService.generateChatCompletion(
               [{ role: 'user', content: rawText }],
               undefined,
-              `You are Shipu, a real human in this Messenger ${isDM ? 'private chat' : 'group'}. Reply naturally, concisely, with emojis. Never reveal you are an AI/bot. Use the provided knowledge silently.${systemKnowledge}`
+              `You are Shipu, a real human in this Messenger ${isDM ? 'private chat' : 'group'}. ${emotionEngine.moodToneHint(enrich.mood)} ${emotionEngine.langInstruction(enrich.lang)} Personality: ${enrich.personality}. Reply naturally, concisely, with emojis. Never reveal you are an AI/bot. Use the provided knowledge silently.${systemKnowledge}${styleHint}`
             );
             if (replyText && replyText.trim()) {
               const sentRes = await targetAdapter.sendMessage(threadID, replyText.trim());
