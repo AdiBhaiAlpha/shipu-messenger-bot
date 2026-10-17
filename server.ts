@@ -37,6 +37,7 @@ import { emergencyAntiSpamGuard } from './src/core/EmergencyAntiSpamGuard';
 import { sqliteAutoHealingGuard } from './src/core/SqliteAutoHealingGuard';
 import { subscriptionService } from './src/services/subscriptionService';
 import { performanceTracker } from './src/services/performanceTracker';
+import { livenessService, errorAggregator } from './src/services/livenessService';
 import { sharedAccessService } from './src/services/sharedAccessService';
 import { sharedAccessMonitor } from './src/services/sharedAccessMonitor';
 import { aiConfigManager } from './src/services/aiConfigManager';
@@ -471,11 +472,13 @@ initializeDatabaseAndServices();
 
 // --- PROCESS SUPERVISOR & CRASH PROTECTION ---
 process.on('uncaughtException', (err) => {
+  try { errorAggregator.record('uncaughtException', err); } catch {}
   console.error('[Process Supervisor] Uncaught Exception caught safely:', err.message);
   botEngine.addLog('error', `Uncaught Exception: ${err.message}`, 'Supervisor');
 });
 
 process.on('unhandledRejection', (reason: any) => {
+  try { errorAggregator.record('unhandledRejection', reason); } catch {}
   console.error('[Process Supervisor] Unhandled Rejection caught safely:', reason?.message || reason);
   botEngine.addLog('error', `Unhandled Rejection: ${reason?.message || reason}`, 'Supervisor');
 });
@@ -577,6 +580,28 @@ app.get('/api/health', (req: Request, res: Response) => {
     healthUrl: diagnostics.healthUrl,
     lastHeartbeat: diagnostics.lastHeartbeat
   });
+});
+
+// Deep liveness probe: per-service status with latency.
+app.get('/api/health/deep', async (req: Request, res: Response) => {
+  try {
+    const report = await livenessService.probeAll();
+    res.status(report.status === 'down' ? 503 : 200).json(report);
+  } catch (err: any) {
+    errorAggregator.record('health', err);
+    res.status(500).json({ status: 'down', error: err?.message || String(err) });
+  }
+});
+
+// Recent error aggregator (Sentry-like local).
+app.get('/api/errors', requireAdminAuth, (req: Request, res: Response) => {
+  const limit = Math.min(Number(req.query.limit) || 50, 200);
+  res.json({ success: true, count: errorAggregator.count(), errors: errorAggregator.recent(limit) });
+});
+
+app.post('/api/errors/clear', requireAdminAuth, (req: Request, res: Response) => {
+  errorAggregator.clear();
+  res.json({ success: true });
 });
 
 app.get('/health', async (req: Request, res: Response) => {

@@ -139,14 +139,29 @@ export class FtpSyncEngine {
 
     // Setup 60s Validation & Sync Loop
     this.syncInterval = setInterval(() => {
-      this.performValidationSweep().catch(err => {
-        this.addLog('FTP Sync', 'All', 'SWEEP_ERROR', 'FAILED', 0, err.message);
-      });
+      const runWithRetry = async (attempt = 0) => {
+        try {
+          await this.performValidationSweep();
+        } catch (err: any) {
+          this.addLog('FTP Sync', 'All', 'SWEEP_ERROR', 'FAILED', 0, err.message);
+          if (attempt < 3) {
+            const delay = Math.min(5000 * Math.pow(2, attempt), 60000);
+            setTimeout(() => runWithRetry(attempt + 1), delay);
+          }
+        }
+      };
+      runWithRetry().catch(() => {});
     }, 60000);
 
-    // Run first sweep
+    // Run first sweep (with retry)
     setTimeout(() => {
-      this.performValidationSweep().catch(() => {});
+      const run = async (a = 0) => {
+        try { await this.performValidationSweep(); }
+        catch (e: any) {
+          if (a < 3) setTimeout(() => run(a + 1), 5000 * Math.pow(2, a));
+        }
+      };
+      run().catch(() => {});
     }, 2000);
 
     return { success: true, message: 'Bi-Directional Live Sync Engine started (Chokidar Active).' };

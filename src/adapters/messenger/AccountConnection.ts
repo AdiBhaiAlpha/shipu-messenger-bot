@@ -199,6 +199,7 @@ export class AccountConnection {
   private eventListeners: ((event: any) => void)[] = [];
   private statusListeners: ((meta: SafeAccountMeta) => void)[] = [];
   private recentlySeenCache = new Map<string, number>();
+  private static readonly SEEN_CACHE_MAX = 500;
 
   constructor(record: MessengerAccountRecord) {
     this.accountId = record.accountId;
@@ -836,6 +837,10 @@ export class AccountConnection {
             const lastSeenTime = this.recentlySeenCache.get(threadID) || 0;
 
             if (now - lastSeenTime > 4000 || !this.recentlySeenCache.has(dedupeKey)) {
+              if (this.recentlySeenCache.size >= AccountConnection.SEEN_CACHE_MAX) {
+                const firstKey = this.recentlySeenCache.keys().next().value;
+                if (firstKey !== undefined) this.recentlySeenCache.delete(firstKey);
+              }
               this.recentlySeenCache.set(threadID, now);
               this.recentlySeenCache.set(dedupeKey, now);
 

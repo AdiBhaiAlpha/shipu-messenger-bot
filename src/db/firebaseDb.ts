@@ -232,6 +232,8 @@ function applyUpdate(item: any, update: any, isInsert = false): any {
 type DocMap = Map<string, any>;
 const collectionCache = new Map<string, DocMap>();
 const collectionLoaded = new Set<string>();
+const collectionLoadedAt = new Map<string, number>();
+const COLLECTION_TTL_MS = 5 * 60 * 1000; // 5 min TTL
 const collectionFailed = new Map<string, string>();
 
 let dbConnected = false;
@@ -239,7 +241,9 @@ let dbError: string | null = null;
 
 async function ensureCollection(collectionPath: string): Promise<DocMap> {
   const cached = collectionCache.get(collectionPath);
-  if (cached && collectionLoaded.has(collectionPath)) return cached;
+  const loadedAt = collectionLoadedAt.get(collectionPath) || 0;
+  const stale = Date.now() - loadedAt > COLLECTION_TTL_MS;
+  if (cached && collectionLoaded.has(collectionPath) && !stale) return cached;
   const map: DocMap = cached || new Map();
   try {
     const data = await rtdbRequest(urlFor(collectionPath), { method: 'GET' });
@@ -251,6 +255,7 @@ async function ensureCollection(collectionPath: string): Promise<DocMap> {
     }
     collectionCache.set(collectionPath, map);
     collectionLoaded.add(collectionPath);
+    collectionLoadedAt.set(collectionPath, Date.now());
     collectionFailed.delete(collectionPath);
     dbConnected = true;
     dbError = null;
@@ -827,6 +832,18 @@ export function executeFallback(modelName: string, prop: string, args: any[]): a
     return new RtdbCountQuery('__fallback__', {}, col.filter(item => matchesQuery(item, args[0])).length);
   }
   return new RtdbFindQuery('__fallback__', {}, []);
+}
+
+export function invalidateCollection(collectionPath: string): void {
+  collectionLoaded.delete(collectionPath);
+  collectionLoadedAt.delete(collectionPath);
+  collectionCache.delete(collectionPath);
+}
+
+export function invalidateAllCollections(): void {
+  collectionLoaded.clear();
+  collectionLoadedAt.clear();
+  collectionCache.clear();
 }
 
 export function isDatabaseConnectionError(err: any): boolean {

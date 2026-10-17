@@ -107,6 +107,7 @@ class ShiPuBotEngine {
   private threads: Map<string, ShiPuThread> = new Map();
   private logs: BotLog[] = [];
   private cooldowns: Map<string, number> = new Map();
+  private cooldownLocks: Set<string> = new Set();
   private pendingReplies: Map<string, PendingReply> = new Map();
   private processedMessageIDs: Set<string> = new Set();
   private adapter: MessengerAdapter;
@@ -1270,7 +1271,7 @@ class ShiPuBotEngine {
     const lastExecution = this.cooldowns.get(cooldownKey) || 0;
     const cooldownMs = (plugin.config.countDown || 2) * 1000;
 
-    if (now - lastExecution < cooldownMs) {
+    if (this.cooldownLocks.has(cooldownKey) || (now - lastExecution < cooldownMs)) {
       const remainingSecs = Math.ceil((cooldownMs - (now - lastExecution)) / 1000);
       const cooldownMsg = `⏳ Please wait ${remainingSecs}s before using ${plugin.config.name} again.`;
       if (realFcaApi) {
@@ -1285,6 +1286,7 @@ class ShiPuBotEngine {
       };
     }
 
+    this.cooldownLocks.add(cooldownKey);
     this.cooldowns.set(cooldownKey, now);
     this.stats.totalCommandsExecuted++;
 
@@ -1303,6 +1305,7 @@ class ShiPuBotEngine {
       );
 
       messengerLogger.updatePipelineStage('handler_comp', 'success', `Plugin ${plugin.config.name} completed (${executionTimeMs}ms)`);
+      this.cooldownLocks.delete(cooldownKey);
       
       let finalBody = '';
       if (result && typeof result === 'object' && result.body) {
@@ -1362,6 +1365,7 @@ class ShiPuBotEngine {
 
       messengerLogger.error('ERROR', `Command execution failed: ${err.message}`);
       messengerLogger.updatePipelineStage('handler_comp', 'failed', err.message);
+      this.cooldownLocks.delete(cooldownKey);
 
       const logEntry = {
         command: plugin.config.name,
