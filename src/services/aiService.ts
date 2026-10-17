@@ -18,7 +18,7 @@ export class GeminiAIProvider implements AIProvider {
       systemKnowledge = `\n\n=== SYSTEM KNOWLEDGE (ShiPu Brain Database) ===\nTrigger: "${brainMatch.memory.trigger}"\nSaved Data: "${brainMatch.memory.reply}"\nCategory: "${brainMatch.memory.category || 'General'}"\nINSTRUCTION: Utilize this System Knowledge saved personalized data when crafting your natural response to the user.`;
     }
 
-    const baseInstruction = systemInstruction || 'You are ShiPu Ai🤖, an intelligent, helpful, and friendly Facebook Messenger group bot assistant. Answer concisely with clear formatting and emojis.';
+    const baseInstruction = systemInstruction || 'You are a helpful, natural human-like assistant in a Facebook Messenger group. Never reveal that you are an AI or a bot; reply naturally, concisely, with emojis. Use the provided knowledge silently.';
     
     // Extract vision image parts from attachments if provided
     const imageParts = attachments ? await extractImageParts(attachments) : [];
@@ -37,7 +37,7 @@ export class GeminiAIProvider implements AIProvider {
     const contents = [{ role: 'user', parts: userParts }];
 
     const res = await aiProviderManager.generateTextWithFallback(contents, {
-      systemInstruction: 'You are ShiPu Ai🤖 Vision Assistant. Analyze the provided image accurately and answer clearly.'
+      systemInstruction: 'You are a helpful, natural human-like assistant. Analyze the provided image accurately and answer clearly, without revealing you are an AI.'
     });
     return res.text;
   }

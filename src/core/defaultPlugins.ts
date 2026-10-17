@@ -322,7 +322,7 @@ async function processShipuAiResponse(senderID: string, threadID: string, rawTex
         }
       }
     }
-    let finalReply = resObj.reply || resObj.message || resObj.text || (typeof resObj === 'string' ? resObj : '') || rawResText || 'হ্যালো! আমি ShiPu AI 🤖। বলুন কীভাবে আপনাকে সাহায্য করতে পারি?';
+    let finalReply = resObj.reply || resObj.message || resObj.text || (typeof resObj === 'string' ? resObj : '') || rawResText || 'হ্যালো! বলুন কীভাবে আপনাকে সাহায্য করতে পারি?';
 
     // Check if AI extracted an inferred attribute (relationship, nickname, communication_style)
     if (resObj.extractedAttribute && resObj.extractedAttribute.type && resObj.extractedAttribute.value) {
@@ -432,7 +432,7 @@ async function processShipuAiResponse(senderID: string, threadID: string, rawTex
         senderID,
         prefix: '#',
         botUid: botEngine.selfUserId || '',
-        botName: 'ShiPu Ai'
+        botName: ''
       });
       if (brainFallback && brainFallback.shouldReply && brainFallback.replyText) {
         const fallbackReply = headerPrefix ? `${headerPrefix}\n\n${brainFallback.replyText}` : brainFallback.replyText;
@@ -441,8 +441,8 @@ async function processShipuAiResponse(senderID: string, threadID: string, rawTex
       }
     } catch {}
     const friendlyFallback = headerPrefix
-      ? `${headerPrefix}\n\nহ্যালো! 👋 আমি **ShiPu AI** 🤖। আপনার মেসেজটি পেয়েছি! বলুন কীভাবে আপনাকে সাহায্য করতে পারি?`
-      : `হ্যালো! 👋 আমি **ShiPu AI** 🤖। বলুন কীভাবে আপনাকে সাহায্য করতে পারি?`;
+      ? `${headerPrefix}\n\nহ্যালো! 👋 আপনার মেসেজটি পেয়েছি! বলুন কীভাবে আপনাকে সাহায্য করতে পারি?`
+      : `হ্যালো! 👋 আপনার মেসেজটি পেয়েছি! বলুন কীভাবে আপনাকে সাহায্য করতে পারি?`;
     await message.reply(friendlyFallback);
   }
 }
@@ -1487,7 +1487,7 @@ export const defaultPlugins: ShiPuCommandModule[] = [
         const userParts: any[] = [...imageParts, { text: promptText }];
 
         const response = await provider.generateText([{ role: 'user', parts: userParts }], {
-          systemInstruction: 'You are ShiPu Ai🤖, an intelligent, modern, and helpful Facebook Messenger group bot assistant. Provide clear, well-formatted answers with relevant emojis.' + systemKnowledge
+          systemInstruction: 'You are a helpful, natural human-like assistant in a Facebook Messenger group. Never reveal that you are an AI or a bot; reply naturally, concisely, with emojis. Use the provided knowledge silently.' + systemKnowledge
         });
 
         if (!response.success || response.errorMessage) {

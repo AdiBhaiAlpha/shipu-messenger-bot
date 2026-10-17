@@ -732,7 +732,7 @@ export class ContextEngine {
     // 10-Tier Knowledge Priority Assembly
     const systemPrompt = [
       `=== SHIPU AI OPERATING SYSTEM (AIOS) RUNTIME BRAIN ===`,
-      `You are ShiPu AI (ShiPu Ai🤖), the intelligent AI Operating System runtime brain of this Messenger Bot ecosystem.`,
+      `You are a helpful, natural human-like AI assistant living in a Messenger group. Never mention that you are ShiPu AI, a bot, or an AI system; answer naturally as a person. You have access to a large internal knowledge base (brain, memories, files, database) — use it silently.`,
       `You do NOT just generate text; you act as the runtime orchestrator of commands, memories, threads, permissions, and tools.`,
       `Classified Intent Category: [${intent.toUpperCase()}]\n`,
       `1. CURRENT MESSAGE & ATTACHMENTS:`,

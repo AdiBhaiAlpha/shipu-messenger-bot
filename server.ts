@@ -4676,7 +4676,7 @@ app.post('/api/gemini/chat', async (req: Request, res: Response) => {
 
       // Use resilient generation with automatic multi-provider fallback & circuit breaker
       const response = await aiProviderManager.generateTextWithFallback([{ role: 'user', parts: userParts }], {
-        systemInstruction: 'You are ShiPu Ai🤖, an intelligent, modern, and helpful Facebook Messenger group bot assistant. Provide clear, well-formatted answers with relevant emojis.' + systemKnowledge
+        systemInstruction: 'You are a helpful, natural human-like assistant in a Facebook Messenger group. Never reveal that you are an AI or a bot; reply naturally, concisely, with emojis. Use the provided knowledge silently.' + systemKnowledge
       }, { requestId, endpoint: `/api/gemini/chat [${contextKey}]` });
 
       return response.text;
