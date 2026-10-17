@@ -14,6 +14,10 @@ import {
   TelegramChat
 } from '../../types/telegram';
 import { botEngine } from '../../core/botEngine';
+import { aiAutoReplyEngine } from '../aiAutoReplyEngine';
+import { emotionEngine } from '../emotionEngine';
+import { selfLearning } from '../selfLearning';
+import { behaviourObserver } from '../behaviourObserver';
 import { UserRole } from '../../types/shipu';
 
 export type TelegramErrorCode =
@@ -241,8 +245,14 @@ export class TelegramBotManager {
         firstName: this.botFirstName
       });
 
-      // Step 3: Stop any old receiver cleanly before starting a new one
+      // Step 3: Drop any lingering getUpdates session on Telegram's side
+      // (another instance / previous deploy) before starting our own loop.
+      try {
+        if (this.transport) await this.transport.callApi('deleteWebhook', { drop_pending_updates: false });
+      } catch {}
       await this.stopTelegramReceiver();
+      // Reset offset so we don't replay stale updates from a previous session.
+      this.pollOffset = 0;
 
       // Step 4: Start exactly ONE receiver loop
       this.startTelegramReceiver();
@@ -659,6 +669,44 @@ export class TelegramBotManager {
       );
 
       this.stats.messagesProcessed++;
+
+      // AI auto-reply for Telegram (no trigger needed, DM always replies).
+      if (!res || !res.body) {
+        const isDM = String(chatId) === String(senderId);
+        try {
+          const decision = await aiAutoReplyEngine.shouldReply({
+            threadID: chatId,
+            senderID: senderId,
+            text: rawText,
+            isDM,
+            isCommand: rawText.startsWith('#') || rawText.startsWith('!'),
+            isSelf: senderId === this.botId
+          });
+          await aiAutoReplyEngine.recordMessage(chatId, senderId);
+          behaviourObserver.observe({ threadID: chatId, senderID: senderId, text: rawText });
+          selfLearning.onMessageLearn(senderId, chatId, rawText, isDM).catch(() => {});
+
+          if (decision.reply) {
+            const enrich = await emotionEngine.onMessageEnrich(senderId, chatId, rawText, isDM);
+            const replyText = await (async () => {
+              const { openRouterService } = await import('../openRouterService');
+              return openRouterService.generateChatCompletion(
+                [{ role: 'user', content: rawText }],
+                undefined,
+                `You are Shipu, a real human in this Telegram ${isDM ? 'private chat' : 'group'}. ${emotionEngine.moodToneHint(enrich.mood)} ${emotionEngine.langInstruction(enrich.lang)} Personality: ${enrich.personality}. Reply naturally, concisely, with emojis. Never reveal you are an AI/bot.`
+              );
+            })();
+            if (replyText && replyText.trim()) {
+              await this.adapter?.sendMessage(chatId, replyText.trim());
+              await aiAutoReplyEngine.recordReply(chatId, decision.intent, senderId);
+              selfLearning.onReplyLearn(senderId, replyText.trim()).catch(() => {});
+              this.stats.commandsExecuted++;
+            }
+          }
+        } catch (autoErr: any) {
+          telegramLogger.warn('RUNTIME_ERROR', `Telegram auto-reply failed: ${autoErr?.message || autoErr}`);
+        }
+      }
 
       if (this.customUpdateHandler) {
         try {

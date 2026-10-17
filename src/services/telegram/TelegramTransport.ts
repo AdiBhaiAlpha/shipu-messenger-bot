@@ -29,7 +29,7 @@ export class TelegramTransport {
     this.token = token.trim();
   }
 
-  private async callApi<T = any>(
+  public async callApi<T = any>(
     method: string,
     payload?: any,
     signal?: AbortSignal,
