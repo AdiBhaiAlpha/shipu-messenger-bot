@@ -22,7 +22,7 @@ export function initEnv(): void {
   setDefault('BOT_OWNER_ID', '100081330372098');
 
   // AI providers (primary keys; OpenRouter fallback lives in aiKeys.ts)
-  setDefault('OPENROUTER_API_KEY', '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');
+  setDefault('OPENROUTER_API_KEY', 'cohere_nNS6cpJnJiYYKW8wUkUjWClGx6MzyLRW8pT6nuSx3szSg2');
   setDefault('GEMINI_API_KEY', '');
   setDefault('GOOGLE_API_KEY', '');
   setDefault('AI_MODEL', 'google/gemma-2-9b-it:free');

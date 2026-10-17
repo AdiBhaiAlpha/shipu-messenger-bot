@@ -1,6 +1,6 @@
 import axios from 'axios';
 import { aiConfigManager } from './aiConfigManager';
-import { OPENROUTER_FALLBACK_KEY } from '../config/aiKeys';
+import { OPENROUTER_FALLBACK_KEY, AI_API_KEYS, COHERE_API_KEY } from '../config/aiKeys';
 import { OPENROUTER_FALLBACK_ORDER } from '../config/aiModels';
 import fs from 'fs-extra';
 import path from 'path';
@@ -90,10 +90,12 @@ export class OpenRouterService {
     }
 
     // Primary key first, hardcoded fallback second (only when different).
-    const candidateKeys = [apiKey];
-    if (OPENROUTER_FALLBACK_KEY && OPENROUTER_FALLBACK_KEY !== apiKey) {
-      candidateKeys.push(OPENROUTER_FALLBACK_KEY);
+    // Cohere trial key first, then OpenRouter keys (dedup).
+    const candidateKeys: string[] = [];
+    for (const k of AI_API_KEYS) {
+      if (k && !candidateKeys.includes(k)) candidateKeys.push(k);
     }
+    if (apiKey && !candidateKeys.includes(apiKey)) candidateKeys.unshift(apiKey);
 
     const modelChain = this.buildModelChain(config, model);
     if (modelChain.length === 0) {
