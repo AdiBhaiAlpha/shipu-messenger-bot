@@ -309,6 +309,7 @@ export const AIProvidersDashboard: React.FC<AIProvidersDashboardProps> = ({ toke
                   className="w-full bg-slate-950 border border-slate-800 hover:border-slate-700 text-slate-100 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/40 transition duration-200"
                 >
                   <option value="openrouter">OpenRouter API (Default)</option>
+                  <option value="cohere">Cohere API (Trial)</option>
                   <option value="google_studio">Google AI Studio (Gemini SDK)</option>
                 </select>
                 <p className="text-[10px] text-slate-500">
@@ -378,7 +379,7 @@ export const AIProvidersDashboard: React.FC<AIProvidersDashboardProps> = ({ toke
                 </button>
               </div>
               <p className="text-[11px] text-slate-500 leading-normal">
-                Requires an OpenRouter API key starting with <code>sk-or-v1-</code>. Key is encrypted on saving.
+                Primary key (Cohere trial or OpenRouter sk-or-v1-...). All keys tried in priority order; encrypted on saving.
               </p>
             </div>
 
