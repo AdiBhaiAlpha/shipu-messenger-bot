@@ -27,6 +27,7 @@ import { parseCommand, isSelfEvent, recordBotMessageId } from '../utils/commandP
 import { smartConversationBrain } from './smartConversationBrain';
 import { aiAutoReplyEngine } from '../services/aiAutoReplyEngine';
 import { behaviourObserver } from '../services/behaviourObserver';
+import { selfLearning } from '../services/selfLearning';
 import { brainService } from '../services/brainService';
 import { aiosService } from '../services/aiosService';
 import { BrainMemoryModel, BrainSuggestionModel } from '../db/firebaseDb';
@@ -85,6 +86,8 @@ export function routeIncomingMessage(
   // 4. Normal Conversational Chat
   // Behaviour observer: capture human-style signals for Shipu's learning (fire-and-forget).
   try { behaviourObserver.observe({ threadID, senderID, text: rawText }); } catch {}
+  // Self-learning: passive facts + conversation context (fire-and-forget).
+  try { selfLearning.onMessageLearn(senderID, threadID, rawText, String(threadID) === String(senderID)).catch(() => {}); } catch {}
   return 'NORMAL_CHAT';
 }
 
@@ -891,6 +894,7 @@ class ShiPuBotEngine {
               const resMsgId = sentRes?.messageID || `msg_auto_${Date.now()}`;
               recordBotMessageId(resMsgId);
               await aiAutoReplyEngine.recordReply(threadID, decision.intent, senderID);
+              try { selfLearning.onReplyLearn(senderID, replyText.trim()).catch(() => {}); } catch {}
               return {
                 messageID: resMsgId,
                 threadID,

@@ -390,6 +390,13 @@ async function initializeDatabaseAndServices() {
       console.error('[ClientBotsManager] Failed to start:', err);
     }
     try {
+      const { selfLearning } = await import('./src/services/selfLearning');
+      selfLearning.startSelfLearningScheduler();
+      console.log('[SelfLearning] Scheduler started (nightly reflection + knowledge ingestion).');
+    } catch (err: any) {
+      console.warn('[SelfLearning] Scheduler start failed:', err?.message || err);
+    }
+    try {
       await aiConfigManager.getConfig(true);
       console.log('[AIConfig] Central AI Configuration loaded successfully');
     } catch (err: any) {
