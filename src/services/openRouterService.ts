@@ -10,6 +10,7 @@ export class OpenRouterService {
 
   // Per-model circuit breaker: skip models failing repeatedly (reset on success/cooldown).
   private modelFailures = new Map<string, { count: number; lastFail: number }>();
+  private responseCache = new Map<string, { text: string; model: string; ts: number }>();
   private static readonly MODEL_FAIL_LIMIT = 3;
   private static readonly MODEL_FAIL_WINDOW_MS = 10 * 60 * 1000;
 
@@ -102,21 +103,27 @@ export class OpenRouterService {
       throw new Error('[OpenRouter API Error]: All models are circuit-broken after repeated failures. Try again later.');
     }
 
+    // Response cache (5-min TTL) — identical prompt+context returns instantly.
+    const cacheKey = JSON.stringify({ m: modelChain[0], msgs: requestMessages.map(m => m.content).join('|').slice(0, 300) });
+    const cached = this.responseCache.get(cacheKey);
+    if (cached && (Date.now() - cached.ts) < 5 * 60 * 1000) {
+      this.lastUsedModel = cached.model;
+      return cached.text;
+    }
+
     let lastError: any = null;
     let lastStatus: number | undefined;
     let keysDead = false;
-    modelLoop:
-    for (const targetModel of modelChain) {
+    const raceBatch = Math.min(3, modelChain.length);
+    // Race the first `raceBatch` models; on failure fall through to the rest sequentially.
+    const tryOne = async (targetModel: string): Promise<string | null> => {
       for (let keyIdx = 0; keyIdx < candidateKeys.length; keyIdx++) {
         const keyInUse = candidateKeys[keyIdx];
         const isFallbackKey = keyIdx > 0;
         try {
           const response = await axios.post(
             'https://openrouter.ai/api/v1/chat/completions',
-            {
-              model: targetModel,
-              messages: requestMessages
-            },
+            { model: targetModel, messages: requestMessages },
             {
               headers: {
                 'Authorization': `Bearer ${keyInUse}`,
@@ -124,54 +131,73 @@ export class OpenRouterService {
                 'HTTP-Referer': 'https://ai.studio/build',
                 'X-Title': 'ShiPu AI Bot'
               },
-              timeout: 45000
+              timeout: 12000
             }
           );
-
           const content = response.data?.choices?.[0]?.message?.content;
-          if (content === undefined || content === null) {
-            throw new Error('Invalid or empty response from OpenRouter');
-          }
-
-          // SUCCESS: remember this model as the sticky default until it errors.
-          this.lastUsedModel = targetModel;
-          this.recordModelSuccess(targetModel);
-          const updates: any = {
-            status: 'Connected',
-            lastSuccessfulRequestTime: new Date().toISOString()
-          };
-          if (targetModel !== config.lastWorkingModel) {
-            updates.lastWorkingModel = targetModel;
-          }
-          if (isFallbackKey || targetModel !== (model || config.defaultModel)) {
-            updates.lastError = `Served by ${targetModel}${isFallbackKey ? ' (fallback key)' : ''} at ${new Date().toLocaleTimeString()}`;
-          }
-          await aiConfigManager.updateConfig(updates);
-
-          if (isFallbackKey || targetModel !== (model || config.defaultModel)) {
-            console.log(`[OpenRouter] Served by fallback model ${targetModel}${isFallbackKey ? ' (fallback key)' : ''}.`);
-          }
-          return content;
+          if (content === undefined || content === null) throw new Error('Invalid or empty response from OpenRouter');
+          return JSON.stringify({ content, targetModel, isFallbackKey });
         } catch (err: any) {
           lastError = err;
           lastStatus = err.response?.status;
           const msgText = String(err.response?.data?.error?.message || err.message || '').toLowerCase();
-          // Account-level death ("User not found") kills every model+key the
-          // same way — abort the whole chain instead of burning 16 models.
-          if (msgText.includes('user not found')) {
-            keysDead = true;
-            console.error('[OpenRouter] API keys rejected (account gone). Aborting model chain.');
-            break modelLoop;
-          }
-          // Fail over across keys AND models on auth rejection, rate limit,
-          // missing-model (404), or transport failure — never on 400 payloads.
+          if (msgText.includes('user not found')) { keysDead = true; }
           const retryable = lastStatus === 401 || lastStatus === 403 || lastStatus === 429 || lastStatus === 404 || lastStatus === undefined;
-          if (!retryable) break;
-          console.warn(`[OpenRouter] ${targetModel} failed (HTTP ${lastStatus ?? 'network error'}). Trying next...`);
+          if (!retryable) return null;
         }
       }
-      // Model exhausted on all keys -> circuit-break it and move to next model.
       this.recordModelFailure(targetModel);
+      return null;
+    };
+
+    // Race phase
+    const raceModels = modelChain.slice(0, raceBatch);
+    const restModels = modelChain.slice(raceBatch);
+    const raceResults = await Promise.all(raceModels.map(m => tryOne(m)));
+    for (let i = 0; i < raceResults.length; i++) {
+      const r = raceResults[i];
+      if (!r) continue;
+      let parsed: any;
+      try { parsed = JSON.parse(r); } catch { continue; }
+      const targetModel = parsed.targetModel;
+      const content = parsed.content;
+      const isFallbackKey = parsed.isFallbackKey;
+      this.lastUsedModel = targetModel;
+      this.recordModelSuccess(targetModel);
+      this.responseCache.set(cacheKey, { text: content, model: targetModel, ts: Date.now() });
+      if (this.responseCache.size > 200) {
+        const first = this.responseCache.keys().next().value;
+        if (first) this.responseCache.delete(first);
+      }
+      const updates: any = { status: 'Connected', lastSuccessfulRequestTime: new Date().toISOString() };
+      if (targetModel !== config.lastWorkingModel) updates.lastWorkingModel = targetModel;
+      await aiConfigManager.updateConfig(updates);
+      return content;
+    }
+
+    if (keysDead) {
+      console.error('[OpenRouter] API keys rejected (account gone). Aborting model chain.');
+    } else {
+      // Sequential fallback phase
+      for (const targetModel of restModels) {
+        const r = await tryOne(targetModel);
+        if (!r) continue;
+        let parsed: any;
+        try { parsed = JSON.parse(r); } catch { continue; }
+        const targetModel2 = parsed.targetModel;
+        const content = parsed.content;
+        this.lastUsedModel = targetModel2;
+        this.recordModelSuccess(targetModel2);
+        this.responseCache.set(cacheKey, { text: content, model: targetModel2, ts: Date.now() });
+        if (this.responseCache.size > 200) {
+          const first = this.responseCache.keys().next().value;
+          if (first) this.responseCache.delete(first);
+        }
+        const updates: any = { status: 'Connected', lastSuccessfulRequestTime: new Date().toISOString() };
+        if (targetModel2 !== config.lastWorkingModel) updates.lastWorkingModel = targetModel2;
+        await aiConfigManager.updateConfig(updates);
+        return content;
+      }
     }
 
     const err: any = lastError || new Error('All OpenRouter models failed');
