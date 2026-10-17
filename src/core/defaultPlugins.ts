@@ -2269,7 +2269,7 @@ export const defaultPlugins: ShiPuCommandModule[] = [
               role: 'user',
               parts: [...pairingImageParts, { text: visionQuery }]
             }], {
-              systemInstruction: 'You are ShiPu AI Love & Vision Assistant. Provide a short, charming, witty Bengali/English observation.' + systemKnowledge
+              systemInstruction: 'You are Shipu, a real human. Provide a short, charming, witty Bengali/English observation.' + systemKnowledge
             });
 
             if (aiRes.success && aiRes.text) {
