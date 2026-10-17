@@ -1178,7 +1178,7 @@ app.post('/api/system/performance/reset', (req: Request, res: Response) => {
 });
 
 // --- MONGODB RUNTIME STORAGE STATUS ENDPOINTS ---
-app.get(['/api/mongodb/status', '/api/database/status'], (req: Request, res: Response) => {
+app.get(['/api/mongodb/status', '/api/database/status', '/api/firebase/status'], (req: Request, res: Response) => {
   const mongoStatus = getDatabaseStatus();
   res.json({
     connected: mongoStatus.connected,
@@ -3709,6 +3709,33 @@ app.post('/api/bot/commands/test', requireAdminAuth, async (req: Request, res: R
       timestamp: new Date().toISOString()
     });
   }
+});
+
+app.post('/api/bot/plugins/custom', requireAdminAuth, async (req: Request, res: Response) => {
+  const { name, description, category, role, code } = req.body || {};
+  if (!name || !code) {
+    return res.status(400).json({ error: 'Command Name and Code are required' });
+  }
+  const cleanName = String(name).toLowerCase().trim();
+  const commandRecord = {
+    name: cleanName,
+    filename: `${cleanName}.js`,
+    description: description || 'ShiPu Ai Custom Command',
+    category: category || 'Custom',
+    role: Number(role) || 0,
+    aliases: [],
+    guide: `{pref}${cleanName}`,
+    countDown: 2,
+    enabled: true,
+    author: 'Admin',
+    version: '1.0.0',
+    code,
+    updatedAt: new Date().toISOString()
+  };
+  await commandsData.set(cleanName, commandRecord);
+  await botEngine.reloadPluginsFromDatabase();
+  auditLogsData.add('admin', `Published Custom Plugin "${cleanName}"`, cleanName, 'SUCCESS');
+  res.json({ success: true, message: `Custom plugin ${cleanName} saved and hot-reloaded!`, command: commandRecord });
 });
 
 app.post('/api/bot/plugins/toggle', requireAdminAuth, async (req: Request, res: Response) => {
