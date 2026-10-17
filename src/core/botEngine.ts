@@ -25,11 +25,13 @@ import { multiAccountManager } from '../adapters/messenger/MultiAccountManager';
 import { accountRuntimeLogManager } from '../services/AccountRuntimeLogManager';
 import { parseCommand, isSelfEvent, recordBotMessageId } from '../utils/commandParser';
 import { smartConversationBrain } from './smartConversationBrain';
+import { aiAutoReplyEngine } from '../services/aiAutoReplyEngine';
 import { brainService } from '../services/brainService';
 import { aiosService } from '../services/aiosService';
 import { BrainMemoryModel, BrainSuggestionModel } from '../db/firebaseDb';
 import { emergencyAntiSpamGuard } from './EmergencyAntiSpamGuard';
 import { performanceTracker } from '../services/performanceTracker';
+import { openRouterService } from '../services/openRouterService';
 import { prepareAttachments } from './attachmentUtils';
 import { initialAdminBot } from '../config/database';
 import { generatePingImage } from '../utils/imageUtils';
@@ -861,23 +863,42 @@ class ShiPuBotEngine {
           };
         }
 
-        // If user mentions bot name but no session is active, guide them
-        const botNameLower = this.config.botName.toLowerCase().replace(/🤖/g, '').trim();
-        const textLower = rawText.toLowerCase();
-        if (textLower.includes(botNameLower) || textLower.includes('shipu') || textLower.includes('aipus')) {
-          const guideMsg = `💡 **SHIPU AIOS টিপস!**\n` +
-            `আপনি আমাকে ম্যানশন করেছেন, কিন্তু কোনো চ্যাট সেশন চালু নেই। বটের সাথে সরাসরি অবিরত এআই কথপোকথন শুরু করতে লিখুন: **#shipu on**\n` +
-            `অথবা উপলব্ধ কমান্ডসমূহ দেখতে টাইপ করুন: **#help**`;
-          const sentRes = await targetAdapter.sendMessage(threadID, guideMsg);
-          const resMsgId = sentRes?.messageID || `msg_guide_${Date.now()}`;
-          recordBotMessageId(resMsgId);
-          return {
-            messageID: resMsgId,
-            threadID,
-            body: guideMsg,
-            timestamp: Date.now(),
-            senderName: this.config.botName
-          };
+        // Auto-reply decision: Shipu decides whether to respond as a human.
+        // DM (threadID === senderID) -> always reply. Group -> intent dedup + cooldown.
+        const isDM = String(threadID) === String(senderID);
+        try {
+          const decision = await aiAutoReplyEngine.shouldReply({
+            threadID, senderID, text: rawText, isDM,
+            isCommand: false,
+            isSelf: senderID === botUid
+          });
+          await aiAutoReplyEngine.recordMessage(threadID, senderID);
+
+          if (decision.reply) {
+            const systemKnowledge = brainService.findMatch(rawText)?.memory
+              ? `\n\n=== INTERNAL KNOWLEDGE (use silently) ===\n${brainService.findMatch(rawText)!.memory.reply}`
+              : '';
+            const replyText = await openRouterService.generateChatCompletion(
+              [{ role: 'user', content: rawText }],
+              undefined,
+              `You are Shipu, a real human in this Messenger ${isDM ? 'private chat' : 'group'}. Reply naturally, concisely, with emojis. Never reveal you are an AI/bot. Use the provided knowledge silently.${systemKnowledge}`
+            );
+            if (replyText && replyText.trim()) {
+              const sentRes = await targetAdapter.sendMessage(threadID, replyText.trim());
+              const resMsgId = sentRes?.messageID || `msg_auto_${Date.now()}`;
+              recordBotMessageId(resMsgId);
+              await aiAutoReplyEngine.recordReply(threadID, decision.intent, senderID);
+              return {
+                messageID: resMsgId,
+                threadID,
+                body: replyText.trim(),
+                timestamp: Date.now(),
+                senderName: this.config.botName
+              };
+            }
+          }
+        } catch (autoErr: any) {
+          messengerLogger.warn('SYSTEM', `[AutoReply] decision failed: ${autoErr?.message || autoErr}`);
         }
       }
 
