@@ -45,7 +45,7 @@ export class AIConfigManager {
     return {
       openRouterApiKey: process.env.OPENROUTER_API_KEY || '',
       defaultProvider: 'openrouter',
-      defaultModel: 'google/gemma-2-9b-it:free',
+      defaultModel: 'liquid/lfm-2.5-2.6b:free',
       lastWorkingModel: '',
       modelFallbackOrder: [...OPENROUTER_FALLBACK_ORDER],
       aiEnabled: true,
@@ -76,7 +76,7 @@ export class AIConfigManager {
     const defaultConf: AIConfiguration = {
       openRouterApiKey: process.env.OPENROUTER_API_KEY || '',
       defaultProvider: 'openrouter',
-      defaultModel: 'google/gemma-2-9b-it:free',
+      defaultModel: 'liquid/lfm-2.5-2.6b:free',
       lastWorkingModel: '',
       modelFallbackOrder: [...OPENROUTER_FALLBACK_ORDER],
       aiEnabled: true,
