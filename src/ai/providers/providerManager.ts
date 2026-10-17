@@ -1,5 +1,6 @@
 import { GoogleAIStudioProvider, AIProvider, AIProviderResponse, AIOSGenerateOptions } from './googleStudio';
 import { OpenRouterAIProvider } from './openRouterProvider';
+import { CohereAIProvider } from './cohereProvider';
 import { aiConfigManager } from '../../services/aiConfigManager';
 
 export interface ProviderMetrics {
@@ -26,6 +27,7 @@ export class AIProviderManager {
   private COOLDOWN_MS = 60000; // 1 minute circuit breaker cooldown
 
   private constructor() {
+    this.registerProvider(new CohereAIProvider());
     this.registerProvider(new GoogleAIStudioProvider());
     this.registerProvider(new OpenRouterAIProvider());
   }
@@ -142,6 +144,9 @@ export class AIProviderManager {
 
     // Prioritize primary provider, then remaining providers
     const orderedProviders = registered.sort((a, b) => {
+      // cohere always first (user mandate), then configured primary, then rest
+      if (a.id === 'cohere') return -1;
+      if (b.id === 'cohere') return 1;
       if (a.id === primaryId) return -1;
       if (b.id === primaryId) return 1;
       return 0;
