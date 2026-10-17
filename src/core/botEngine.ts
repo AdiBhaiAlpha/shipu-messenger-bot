@@ -26,6 +26,7 @@ import { accountRuntimeLogManager } from '../services/AccountRuntimeLogManager';
 import { parseCommand, isSelfEvent, recordBotMessageId } from '../utils/commandParser';
 import { smartConversationBrain } from './smartConversationBrain';
 import { aiAutoReplyEngine } from '../services/aiAutoReplyEngine';
+import { behaviourObserver } from '../services/behaviourObserver';
 import { brainService } from '../services/brainService';
 import { aiosService } from '../services/aiosService';
 import { BrainMemoryModel, BrainSuggestionModel } from '../db/firebaseDb';
@@ -82,6 +83,8 @@ export function routeIncomingMessage(
   }
 
   // 4. Normal Conversational Chat
+  // Behaviour observer: capture human-style signals for Shipu's learning (fire-and-forget).
+  try { behaviourObserver.observe({ threadID, senderID, text: rawText }); } catch {}
   return 'NORMAL_CHAT';
 }
 
