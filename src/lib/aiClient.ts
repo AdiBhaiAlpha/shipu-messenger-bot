@@ -16,7 +16,7 @@ export interface AIClientOptions {
 }
 
 export class AIClient {
-  private static defaultEndpoint = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-latest:generateContent';
+  private static defaultEndpoint = 'https://generativelanguage.googleapis.com/v1beta/models/gemma-4-26b-a4b-it:generateContent';
   private static defaultKey = 'AQ.Ab8RN6IehQEBeOqTHmEkmOGOYbYzSrS6VNkYVzWf_SJDbLSERA';
 
   /**

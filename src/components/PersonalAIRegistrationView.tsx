@@ -666,14 +666,14 @@ export const PersonalAIRegistrationView: React.FC<PersonalAIRegistrationViewProp
                         <div>
                           <label className="block text-xs font-semibold text-slate-600 dark:text-slate-400 mb-1.5">AI Model</label>
                           <select
-                            value={settingsForm.aiModel || 'gemini-3.6-flash'}
+                            value={settingsForm.aiModel || 'gemma-4-26b-a4b-it'}
                             onChange={(e) => setSettingsForm({ ...settingsForm, aiModel: e.target.value })}
                             className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl text-sm text-slate-900 dark:text-white"
                           >
-                            <option value="gemini-3.6-flash">Gemini 3.6 Flash (Recommended)</option>
-                            <option value="gemini-2.5-flash">Gemini 2.5 Flash</option>
-                            <option value="gemini-2.5-pro">Gemini 2.5 Pro</option>
-                            <option value="gemini-flash-latest">Gemini Flash Latest</option>
+                            <option value="gemma-4-26b-a4b-it">Gemini 3.6 Flash (Recommended)</option>
+                            <option value="gemma-4-26b-a4b-it">Gemini 2.5 Flash</option>
+                            <option value="gemma-4-26b-a4b-it">Gemini 2.5 Pro</option>
+                            <option value="gemma-4-26b-a4b-it">Gemini Flash Latest</option>
                           </select>
                         </div>
 

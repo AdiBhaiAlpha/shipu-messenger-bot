@@ -72,7 +72,7 @@ module.exports = {
           'gemini-3.1-flash-image-preview',
           'gemini-3.1-flash-image',
           'gemini-3.1-flash-lite-image',
-          'gemini-3.6-flash'
+          'gemma-4-26b-a4b-it'
         ];
 
         for (const model of modelsToTry) {

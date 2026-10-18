@@ -54,7 +54,7 @@ module.exports = {
         });
 
         const response = await ai.models.generateContent({
-          model: 'gemini-3.6-flash',
+          model: 'gemma-4-26b-a4b-it',
           contents: {
             parts: [{ text: prompt }]
           },

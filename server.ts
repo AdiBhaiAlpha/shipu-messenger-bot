@@ -1012,7 +1012,7 @@ app.get('/api/system/gemini-diagnostic', async (req: Request, res: Response) => 
 
   const startTime = Date.now();
   try {
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent?key=${apiKey}`;
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemma-4-26b-a4b-it:generateContent?key=${apiKey}`;
     const payload = {
       contents: [{ parts: [{ text: "ping" }] }]
     };
@@ -4815,7 +4815,7 @@ app.post('/api/fallback-apis', requireAdminAuth, async (req: Request, res: Respo
       name,
       url,
       apiKey,
-      model: model || 'gemini-flash-latest',
+      model: model || 'gemma-4-26b-a4b-it',
       enabled: enabled !== undefined ? enabled : true,
       priority: priority !== undefined ? Number(priority) : 0
     });
@@ -4912,7 +4912,7 @@ app.post('/api/fallback-apis/test-connection', requireAdminAuth, async (req: Req
       };
       if (!finalUrl.includes(':generateContent') && !finalUrl.includes('/chat/completions')) {
         if (finalUrl.includes('generativelanguage.googleapis.com')) {
-          finalUrl = `${finalUrl.replace(/\/$/, '')}/v1beta/models/${model || 'gemini-flash-latest'}:generateContent`;
+          finalUrl = `${finalUrl.replace(/\/$/, '')}/v1beta/models/${model || 'gemma-4-26b-a4b-it'}:generateContent`;
         }
       }
       const separator = finalUrl.includes('?') ? '&' : '?';

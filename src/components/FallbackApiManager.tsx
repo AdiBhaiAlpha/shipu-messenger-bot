@@ -60,7 +60,7 @@ export const FallbackApiManager: React.FC<FallbackApiManagerProps> = React.memo(
   const [formName, setFormName] = useState('');
   const [formUrl, setFormUrl] = useState('');
   const [formApiKey, setFormApiKey] = useState('');
-  const [formModel, setFormModel] = useState('gemini-flash-latest');
+  const [formModel, setFormModel] = useState('gemma-4-26b-a4b-it');
   const [formEnabled, setFormEnabled] = useState(true);
   const [formPriority, setFormPriority] = useState(0);
 
@@ -178,9 +178,9 @@ export const FallbackApiManager: React.FC<FallbackApiManagerProps> = React.memo(
   const handleOpenAddModal = () => {
     setEditingApi(null);
     setFormName('');
-    setFormUrl('https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-latest:generateContent');
+    setFormUrl('https://generativelanguage.googleapis.com/v1beta/models/gemma-4-26b-a4b-it:generateContent');
     setFormApiKey('');
-    setFormModel('gemini-flash-latest');
+    setFormModel('gemma-4-26b-a4b-it');
     setFormEnabled(true);
     setFormPriority(0);
     setIsModalOpen(true);
@@ -750,7 +750,7 @@ export const FallbackApiManager: React.FC<FallbackApiManagerProps> = React.memo(
                     type="text"
                     value={formModel}
                     onChange={e => setFormModel(e.target.value)}
-                    placeholder="gemini-flash-latest"
+                    placeholder="gemma-4-26b-a4b-it"
                     className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-slate-200 focus:outline-none focus:border-indigo-500 font-mono"
                   />
                 </div>
