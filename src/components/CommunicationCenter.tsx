@@ -539,7 +539,7 @@ export const CommunicationCenter: React.FC = () => {
                           <span className="truncate">{item.name}</span>
                         </h4>
                         <span className="text-[10px] text-slate-500 shrink-0">
-                          {new Date(item.lastMessage.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                          {(() => { const ts = Number(item.lastMessage?.timestamp); return Number.isFinite(ts) && ts > 0 ? new Date(ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : ''; })()}
                         </span>
                       </div>
                       <p className="text-[11px] text-slate-400 truncate mt-0.5">

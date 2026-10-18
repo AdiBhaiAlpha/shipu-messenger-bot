@@ -62,7 +62,6 @@ export const BotInboxManager: React.FC = () => {
   const [toastMessage, setToastMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
   const fetchInboxData = async () => {
-    setLoading(true);
     try {
       const res = await fetch('/api/messenger/inbox/all');
       const data = await res.json();
@@ -75,7 +74,6 @@ export const BotInboxManager: React.FC = () => {
       }
     } catch (e) {
       console.error('Failed to fetch bot inbox data:', e);
-      showToast('error', 'Failed to load bot inbox and requests.');
     } finally {
       setLoading(false);
     }
@@ -83,6 +81,8 @@ export const BotInboxManager: React.FC = () => {
 
   useEffect(() => {
     fetchInboxData();
+    const iv = setInterval(() => { fetchInboxData(); }, 8000);
+    return () => clearInterval(iv);
   }, []);
 
   const showToast = (type: 'success' | 'error', text: string) => {
@@ -339,7 +339,7 @@ export const BotInboxManager: React.FC = () => {
                       <div className="flex items-center justify-between">
                         <h4 className="font-bold text-slate-100 text-xs truncate">{item.name}</h4>
                         <span className="text-[10px] text-slate-500 shrink-0">
-                          {new Date(item.lastMessage.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                          {(() => { const ts = Number(item.lastMessage?.timestamp); return Number.isFinite(ts) && ts > 0 ? new Date(ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : ''; })()}
                         </span>
                       </div>
                       <p className="text-[11px] text-slate-400 truncate mt-0.5">
@@ -465,7 +465,7 @@ export const BotInboxManager: React.FC = () => {
                     <div className="flex items-center gap-2">
                       <span className="text-xs font-semibold text-slate-300">{selectedItem.lastMessage.senderName}</span>
                       <span className="text-[10px] text-slate-500">
-                        {new Date(selectedItem.lastMessage.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                        {(() => { const ts = Number(selectedItem.lastMessage?.timestamp); return Number.isFinite(ts) && ts > 0 ? new Date(ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : ''; })()}
                       </span>
                     </div>
                     <div className="p-3 bg-slate-800 text-slate-200 text-xs rounded-2xl rounded-tl-sm border border-slate-700">
