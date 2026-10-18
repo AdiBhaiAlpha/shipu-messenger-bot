@@ -37,7 +37,7 @@ export class CohereAIProvider implements AIProvider {
         message: lastUser?.content || '',
         chat_history: chatHistory.map(m => ({ role: m.role === 'assistant' ? 'CHATBOT' : 'USER', message: m.content })),
         temperature: 0.7,
-        max_tokens: 1024
+        max_tokens: 512
       };
       if (systemInstruction) body.preamble = systemInstruction;
 
@@ -47,7 +47,7 @@ export class CohereAIProvider implements AIProvider {
           'Content-Type': 'application/json',
           'Accept': 'application/json'
         },
-        timeout: 45000
+        timeout: 15000
       });
 
       const text = res.data?.text || res.data?.message?.content?.[0]?.text || '';

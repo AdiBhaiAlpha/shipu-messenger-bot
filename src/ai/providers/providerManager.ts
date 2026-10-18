@@ -18,7 +18,7 @@ export interface ProviderMetrics {
 export class AIProviderManager {
   private static instance: AIProviderManager;
   private providers: Map<string, AIProvider> = new Map();
-  private activeProviderId = 'openrouter';
+  private activeProviderId = 'cohere';
 
   // Circuit Breaker & Metrics State
   private circuitBreakers = new Map<string, { consecutiveFailures: number; trippedUntil: number }>();
