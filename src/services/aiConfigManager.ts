@@ -195,6 +195,14 @@ export class AIConfigManager {
     }
 
     try {
+      // Try Cohere first (primary), then OpenRouter.
+      if (apiKey.startsWith('cohere_')) {
+        const r = await axios.post('https://api.cohere.com/v1/chat', { model: 'command-a-03-2025', message: 'ping' }, {
+          headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+          timeout: 10000
+        });
+        if (r.status === 200) return { success: true, status: 'Connected' };
+      }
       const response = await axios.get('https://openrouter.ai/api/v1/models', {
         headers: {
           'Authorization': `Bearer ${apiKey}`,

@@ -33,7 +33,7 @@ export class CohereAIProvider implements AIProvider {
       const lastUser = chatHistory.pop();
 
       const body: any = {
-        model: 'command-r-plus',
+        model: 'command-a-03-2025',
         message: lastUser?.content || '',
         chat_history: chatHistory.map(m => ({ role: m.role === 'assistant' ? 'CHATBOT' : 'USER', message: m.content })),
         temperature: 0.7,
@@ -55,11 +55,11 @@ export class CohereAIProvider implements AIProvider {
 
       const latencyMs = Date.now() - startTime;
       await aiConfigManager.updateConfig({ status: 'Connected', lastSuccessfulRequestTime: new Date().toISOString() });
-      return { text, model: 'cohere/command-r-plus', latencyMs, retries: 0, success: true };
+      return { text, model: 'cohere/command-a-03-2025', latencyMs, retries: 0, success: true };
     } catch (err: any) {
       const latencyMs = Date.now() - startTime;
       const msg = err.response?.data?.message || err.message || 'Cohere API error';
-      return { text: '', model: 'cohere/command-r-plus', latencyMs, retries: 0, success: false, errorMessage: msg };
+      return { text: '', model: 'cohere/command-a-03-2025', latencyMs, retries: 0, success: false, errorMessage: msg };
     }
   }
 }
