@@ -72,7 +72,7 @@ export class PersonalAccountConnection {
   public readReceiptsEnabled = false;
   public replyDelayMs = 1000;
   public maxHistory = 20;
-  public aiModel = 'gemini-3.6-flash';
+  public aiModel = 'gemma-4-26b-a4b-it';
   public memorySize = 10;
   public autoSleepMode = false;
   public ignoreUnknownUsers = false;
@@ -130,7 +130,7 @@ export class PersonalAccountConnection {
     this.readReceiptsEnabled = record.readReceiptsEnabled ?? false;
     this.replyDelayMs = record.replyDelayMs ?? 1000;
     this.maxHistory = record.maxHistory ?? 20;
-    this.aiModel = record.aiModel || 'gemini-3.6-flash';
+    this.aiModel = record.aiModel || 'gemma-4-26b-a4b-it';
     this.memorySize = record.memorySize ?? 10;
     this.autoSleepMode = record.autoSleepMode ?? false;
     this.ignoreUnknownUsers = record.ignoreUnknownUsers ?? false;
@@ -572,7 +572,7 @@ export class PersonalAccountConnection {
       }
 
       const ai = new GoogleGenAI({ apiKey });
-      const modelName = this.aiModel || 'gemini-3.6-flash';
+      const modelName = this.aiModel || 'gemma-4-26b-a4b-it';
 
       const systemInstruction = `You are a dedicated personal AI assistant powered by ShiPu AI. You behave like a warm, highly intelligent, helpful, and polite human assistant. You are chatting directly with user ${senderID} on Facebook Messenger. 
 Context details:

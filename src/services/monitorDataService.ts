@@ -100,7 +100,7 @@ export class MonitorDataService {
       },
       aiEngine: {
         provider: 'Google Gemini',
-        model: 'gemini-3.6-flash',
+        model: 'gemma-4-26b-a4b-it',
         providerStatus: 'Stable',
         brainStatus: 'Active',
         memoryLoaded: 450,

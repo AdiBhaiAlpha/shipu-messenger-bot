@@ -74,16 +74,10 @@ export class GoogleAIStudioProvider implements AIProvider {
     const configuredModel = process.env.AI_MODEL?.trim();
     
     // Hierarchical tier list of Gemini models ordered for fast response and high availability
+    // Only the two Gemma models the user approved, via Gemini API.
     const defaultList = [
-      'gemini-3.6-flash',
-      'gemini-3.8-flash',
-      'gemini-3-flash-preview',
-      'gemini-flash-latest',
-      'gemini-3.1-pro-preview',
-      'gemini-2.5-flash',
-      'gemini-2.5-pro',
-      'gemini-3.5-flash',
-      'gemini-3.5-flash-lite'
+      'gemma-4-26b-a4b-it',
+      'gemma-4-31b-it'
     ];
 
     if (configuredModel && !defaultList.includes(configuredModel)) {

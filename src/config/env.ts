@@ -23,9 +23,9 @@ export function initEnv(): void {
 
   // AI providers (primary keys; OpenRouter fallback lives in aiKeys.ts)
   setDefault('OPENROUTER_API_KEY', 'cohere_nNS6cpJnJiYYKW8wUkUjWClGx6MzyLRW8pT6nuSx3szSg2');
-  setDefault('GEMINI_API_KEY', '');
-  setDefault('GOOGLE_API_KEY', '');
-  setDefault('AI_MODEL', 'google/gemma-2-9b-it:free');
+  setDefault('GEMINI_API_KEY', 'AQ.Ab8RN6L1bIzRMYMLjgJO2uvIMLUusGOeI9I3_4xHisAUMHha2w');
+  setDefault('GOOGLE_API_KEY', 'AQ.Ab8RN6L1bIzRMYMLjgJO2uvIMLUusGOeI9I3_4xHisAUMHha2w');
+  setDefault('AI_MODEL', 'gemma-4-26b-a4b-it');
 
   // Session limits
   setDefault('MAX_AUTHORIZED_ACCOUNTS', '10');
